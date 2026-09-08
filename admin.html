@@ -3,58 +3,23 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-    <title>Youth Earner's - Admin Panel</title>
+    <title>Admin Panel - Youth Earner's</title>
+    <link rel="stylesheet" href="style.css">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    
     <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
     <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
     <script src="https://cdn.tailwindcss.com"></script>
-    <style>
-        :root { --black: #000000; --dark: #050505; --gold: #dcae45; --gold-light: #ffe29a; --text: #f8fafc; }
-        body { background: var(--black); color: var(--text); font-family: 'Arial', sans-serif; margin: 0; padding: 0; }
-        .bg-premium-dark { background: radial-gradient(ellipse at top, rgba(220, 174, 69, 0.15) 0%, transparent 60%), radial-gradient(circle at bottom, rgba(220, 174, 69, 0.1) 0%, #000000 60%); background-color: var(--black); min-height: 100vh; }
-        .gold-card { background: linear-gradient(180deg, #111, #050505); border: 1px solid rgba(220,174,69,0.4); box-shadow: 0 0 15px rgba(220,174,69,0.1); transition: all 0.3s ease; }
-        .gold-card:hover { border-color: #dcae45; box-shadow: 0 0 25px rgba(220,174,69,0.3); }
-        .btn-gold { background: linear-gradient(90deg, #dcae45, #ffe29a, #dcae45); color: #000; font-weight: bold; border: none; transition: 0.3s; background-size: 200% auto; }
-        .btn-gold:hover { background-position: right center; }
-        .btn-gold:active { transform: scale(0.95); }
-        .text-gold-gradient { background: linear-gradient(90deg, #ffe29a, #dcae45); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
-        
-        /* Custom Scrollbar for tables */
-        .custom-scroll::-webkit-scrollbar { height: 8px; width: 8px; }
-        .custom-scroll::-webkit-scrollbar-track { background: #111; border-radius: 4px; }
-        .custom-scroll::-webkit-scrollbar-thumb { background: #dcae45; border-radius: 4px; }
-        
-        table { width: 100%; border-collapse: separate; border-spacing: 0; }
-        th { background: #111; color: #dcae45; padding: 12px; text-align: left; border-bottom: 2px solid #dcae45; white-space: nowrap; }
-        td { padding: 12px; border-bottom: 1px solid #333; white-space: nowrap; }
-        tr:hover { background: rgba(220,174,69,0.05); }
-    </style>
 </head>
 <body>
 
     <div id="root"></div>
 
-    <!-- Firebase Connection Script -->
-    <script type="module">
-        import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.1/firebase-app.js";
-        import { getFirestore, collection, query, onSnapshot, doc, setDoc, getDoc, addDoc, updateDoc, deleteDoc } from "https://www.gstatic.com/firebasejs/10.8.1/firebase-firestore.js";
+    <!-- Firebase Connection File -->
+    <script type="module" src="admin.js"></script>
 
-        const firebaseConfig = {
-            apiKey: "AIzaSyA4pTWtUMbZFhrMORZibUhV7gpPRy6DreY",
-            authDomain: "youth-earners-d34ca.firebaseapp.com",
-            projectId: "youth-earners-d34ca",
-            storageBucket: "youth-earners-d34ca.firebasestorage.app",
-            messagingSenderId: "568087034965",
-            appId: "1:568087034965:web:b4f79488d22db53af128dc"
-        };
-
-        const app = initializeApp(firebaseConfig);
-        window.db = getFirestore(app);
-        window.fs = { collection, query, onSnapshot, doc, setDoc, getDoc, addDoc, updateDoc, deleteDoc };
-    </script>
-
-    <!-- React Admin UI -->
+    <!-- React Admin UI Logic -->
     <script type="text/babel">
         const { useState, useEffect } = React;
 
@@ -76,71 +41,71 @@
             const [bannerForm, setBannerForm] = useState({ imageUrl: '', link: '' });
             const [utrForm, setUtrForm] = useState({ utr: '', amount: '' });
 
-            // Simple Admin Auth
+            // Admin Login Check
             const handleLogin = (e) => {
                 e.preventDefault();
-                if(password === 'Admin@123') setIsAuthorized(true); // Default Password
-                else alert('Wrong Password!');
+                if(password === 'Admin@123') setIsAuthorized(true); 
+                else alert('Wrong Password! Access Denied.');
             };
 
-            // ---- FETCH DATA LISENERS ----
+            // ---- FETCH DATA LISTENER ----
             useEffect(() => {
-                if(!isAuthorized || !window.db) return;
+                if(!isAuthorized) return;
+                
+                // Wait for Firebase to load from admin.js
+                const checkFirebase = setInterval(() => {
+                    if(window.fs && window.db) {
+                        clearInterval(checkFirebase);
+                        loadData();
+                    }
+                }, 500);
 
-                const unsubs = [];
-                // 1. Fetch Deposits
-                unsubs.push(window.fs.onSnapshot(window.fs.collection(window.db, "deposits"), (snap) => {
+                return () => clearInterval(checkFirebase);
+            }, [isAuthorized]);
+
+            const loadData = () => {
+                window.fs.onSnapshot(window.fs.collection(window.db, "deposits"), (snap) => {
                     let deps = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
                     setDeposits(deps.sort((a,b) => b.date - a.date));
-                }));
+                });
 
-                // 2. Fetch Withdrawals
-                unsubs.push(window.fs.onSnapshot(window.fs.collection(window.db, "withdrawals"), (snap) => {
+                window.fs.onSnapshot(window.fs.collection(window.db, "withdrawals"), (snap) => {
                     let withs = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
                     setWithdrawals(withs.sort((a,b) => b.date - a.date));
-                }));
+                });
 
-                // 3. Fetch Matches
-                unsubs.push(window.fs.onSnapshot(window.fs.collection(window.db, "matches"), (snap) => {
+                window.fs.onSnapshot(window.fs.collection(window.db, "matches"), (snap) => {
                     setMatches(snap.docs.map(doc => ({ id: doc.id, ...doc.data() })));
-                }));
+                });
 
-                // 4. Fetch Banners
-                unsubs.push(window.fs.onSnapshot(window.fs.collection(window.db, "banners"), (snap) => {
+                window.fs.onSnapshot(window.fs.collection(window.db, "banners"), (snap) => {
                     setBanners(snap.docs.map(doc => ({ id: doc.id, ...doc.data() })));
-                }));
+                });
 
-                // 5. Fetch Admin UTRs
-                unsubs.push(window.fs.onSnapshot(window.fs.collection(window.db, "admin_utrs"), (snap) => {
+                window.fs.onSnapshot(window.fs.collection(window.db, "admin_utrs"), (snap) => {
                     setAdminUtrs(snap.docs.map(doc => ({ id: doc.id, ...doc.data() })));
-                }));
+                });
 
-                // 6. Fetch Settings
                 const fetchSettings = async () => {
                     const snap = await window.fs.getDoc(window.fs.doc(window.db, "settings", "payment"));
                     if(snap.exists()) setSettings(snap.data());
                 };
                 fetchSettings();
+            };
 
-                return () => unsubs.forEach(unsub => unsub());
-            }, [isAuthorized]);
-
-            // ---- AUTO APPROVE LOGIC ----
+            // ---- AUTO APPROVE LOGIC (Auto Shift Deposits) ----
             useEffect(() => {
                 const autoApprove = async () => {
-                    if(deposits.length === 0 || adminUtrs.length === 0) return;
+                    if(deposits.length === 0 || adminUtrs.length === 0 || !window.fs) return;
                     
                     for (let dep of deposits) {
                         if (dep.status === 'pending') {
-                            // Find matching UTR that is unused
                             const match = adminUtrs.find(u => u.utr === dep.utr && u.used === false);
                             if (match && Number(match.amount) === Number(dep.amount)) {
                                 console.log(`Auto-Approving UTR: ${dep.utr}`);
-                                // 1. Mark Deposit as Approved
                                 await window.fs.updateDoc(window.fs.doc(window.db, "deposits", dep.id), { status: 'approved', note: 'Auto' });
-                                // 2. Mark Admin UTR as Used
                                 await window.fs.updateDoc(window.fs.doc(window.db, "admin_utrs", match.id), { used: true });
-                                // 3. Update User Wallet
+                                
                                 const userRef = window.fs.doc(window.db, "users", dep.uid);
                                 const userSnap = await window.fs.getDoc(userRef);
                                 if(userSnap.exists()){
@@ -159,14 +124,14 @@
                 e.preventDefault();
                 await window.fs.addDoc(window.fs.collection(window.db, "matches"), { entry: Number(matchForm.entry), win: Number(matchForm.win), logo: matchForm.logo });
                 setMatchForm({ entry: '', win: '', logo: '' });
-                alert("Match Added!");
+                alert("Match Added Successfully!");
             };
 
             const addBanner = async (e) => {
                 e.preventDefault();
                 await window.fs.addDoc(window.fs.collection(window.db, "banners"), { imageUrl: bannerForm.imageUrl, link: bannerForm.link });
                 setBannerForm({ imageUrl: '', link: '' });
-                alert("Banner Added!");
+                alert("Banner Added Successfully!");
             };
 
             const addUtr = async (e) => {
@@ -183,10 +148,10 @@
             };
 
             const deleteItem = async (col, id) => {
-                if(confirm("Are you sure?")) await window.fs.deleteDoc(window.fs.doc(window.db, col, id));
+                if(confirm("Are you sure you want to delete this?")) await window.fs.deleteDoc(window.fs.doc(window.db, col, id));
             };
 
-            // ---- ACTION BUTTONS (APPROVE / REJECT) ----
+            // ---- ACTIONS (APPROVE / REJECT) ----
             const handleDepositAction = async (dep, action) => {
                 if(confirm(`Are you sure you want to ${action} this deposit?`)){
                     if(action === 'Approve'){
@@ -204,10 +169,8 @@
                 if(confirm(`Are you sure you want to ${action} this withdrawal?`)){
                     if(action === 'Approve'){
                         await window.fs.updateDoc(window.fs.doc(window.db, "withdrawals", wit.id), { status: 'approved' });
-                        // Money was already deducted from user wallet when requesting
                     } else {
                         await window.fs.updateDoc(window.fs.doc(window.db, "withdrawals", wit.id), { status: 'rejected' });
-                        // Refund money to user wallet
                         const userRef = window.fs.doc(window.db, "users", wit.uid);
                         const userSnap = await window.fs.getDoc(userRef);
                         if(userSnap.exists()) await window.fs.updateDoc(userRef, { wallet: userSnap.data().wallet + Number(wit.amount) });
@@ -220,11 +183,11 @@
                 return (
                     <div className="bg-premium-dark flex items-center justify-center min-h-screen">
                         <div className="gold-card p-8 rounded-3xl w-full max-w-sm text-center">
-                            <i className="fa-solid fa-user-tie text-6xl text-[#dcae45] mb-4"></i>
-                            <h2 className="text-2xl font-black text-white mb-6 uppercase tracking-widest">Admin Login</h2>
+                            <i className="fa-solid fa-user-shield text-6xl text-[#dcae45] mb-4"></i>
+                            <h2 className="text-2xl font-black text-white mb-6 uppercase tracking-widest">Admin Control</h2>
                             <form onSubmit={handleLogin} className="flex flex-col gap-4">
                                 <input type="password" placeholder="Admin Password" value={password} onChange={e=>setPassword(e.target.value)} className="bg-black border border-[#dcae45]/50 p-3 rounded-xl text-white text-center tracking-widest outline-none focus:border-[#dcae45]" required />
-                                <button type="submit" className="btn-gold py-3 rounded-xl uppercase tracking-widest mt-2">Access Panel</button>
+                                <button type="submit" className="btn-gold py-3 rounded-xl uppercase tracking-widest mt-2">Login</button>
                             </form>
                         </div>
                     </div>
@@ -238,7 +201,7 @@
                     <div className="w-64 bg-[#0a0a0a] border-r border-[#dcae45]/30 min-h-screen p-4 flex flex-col gap-2 shadow-[4px_0_20px_rgba(220,174,69,0.1)]">
                         <div className="text-center pb-6 border-b border-[#dcae45]/20 mb-4 mt-2">
                             <h1 className="text-2xl font-black text-gold-gradient uppercase tracking-wider">Admin Panel</h1>
-                            <p className="text-xs text-gray-400 tracking-widest">Youth Earners</p>
+                            <p className="text-xs text-gray-400 tracking-widest">Youth Earners VIP</p>
                         </div>
 
                         {[
@@ -257,7 +220,7 @@
                         ))}
                     </div>
 
-                    {/* MAIN CONTENT AREA */}
+                    {/* MAIN CONTENT */}
                     <div className="flex-1 p-8 h-screen overflow-y-auto custom-scroll">
                         
                         {/* DASHBOARD */}
