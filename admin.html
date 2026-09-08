@@ -1,0 +1,455 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <title>Youth Earner's - Admin Panel</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        :root { --black: #000000; --dark: #050505; --gold: #dcae45; --gold-light: #ffe29a; --text: #f8fafc; }
+        body { background: var(--black); color: var(--text); font-family: 'Arial', sans-serif; margin: 0; padding: 0; }
+        .bg-premium-dark { background: radial-gradient(ellipse at top, rgba(220, 174, 69, 0.15) 0%, transparent 60%), radial-gradient(circle at bottom, rgba(220, 174, 69, 0.1) 0%, #000000 60%); background-color: var(--black); min-height: 100vh; }
+        .gold-card { background: linear-gradient(180deg, #111, #050505); border: 1px solid rgba(220,174,69,0.4); box-shadow: 0 0 15px rgba(220,174,69,0.1); transition: all 0.3s ease; }
+        .gold-card:hover { border-color: #dcae45; box-shadow: 0 0 25px rgba(220,174,69,0.3); }
+        .btn-gold { background: linear-gradient(90deg, #dcae45, #ffe29a, #dcae45); color: #000; font-weight: bold; border: none; transition: 0.3s; background-size: 200% auto; }
+        .btn-gold:hover { background-position: right center; }
+        .btn-gold:active { transform: scale(0.95); }
+        .text-gold-gradient { background: linear-gradient(90deg, #ffe29a, #dcae45); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
+        
+        /* Custom Scrollbar for tables */
+        .custom-scroll::-webkit-scrollbar { height: 8px; width: 8px; }
+        .custom-scroll::-webkit-scrollbar-track { background: #111; border-radius: 4px; }
+        .custom-scroll::-webkit-scrollbar-thumb { background: #dcae45; border-radius: 4px; }
+        
+        table { width: 100%; border-collapse: separate; border-spacing: 0; }
+        th { background: #111; color: #dcae45; padding: 12px; text-align: left; border-bottom: 2px solid #dcae45; white-space: nowrap; }
+        td { padding: 12px; border-bottom: 1px solid #333; white-space: nowrap; }
+        tr:hover { background: rgba(220,174,69,0.05); }
+    </style>
+</head>
+<body>
+
+    <div id="root"></div>
+
+    <!-- Firebase Connection Script -->
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.1/firebase-app.js";
+        import { getFirestore, collection, query, onSnapshot, doc, setDoc, getDoc, addDoc, updateDoc, deleteDoc } from "https://www.gstatic.com/firebasejs/10.8.1/firebase-firestore.js";
+
+        const firebaseConfig = {
+            apiKey: "AIzaSyA4pTWtUMbZFhrMORZibUhV7gpPRy6DreY",
+            authDomain: "youth-earners-d34ca.firebaseapp.com",
+            projectId: "youth-earners-d34ca",
+            storageBucket: "youth-earners-d34ca.firebasestorage.app",
+            messagingSenderId: "568087034965",
+            appId: "1:568087034965:web:b4f79488d22db53af128dc"
+        };
+
+        const app = initializeApp(firebaseConfig);
+        window.db = getFirestore(app);
+        window.fs = { collection, query, onSnapshot, doc, setDoc, getDoc, addDoc, updateDoc, deleteDoc };
+    </script>
+
+    <!-- React Admin UI -->
+    <script type="text/babel">
+        const { useState, useEffect } = React;
+
+        function AdminApp() {
+            const [isAuthorized, setIsAuthorized] = useState(false);
+            const [password, setPassword] = useState('');
+            const [activeTab, setActiveTab] = useState('dashboard');
+
+            // Data States
+            const [deposits, setDeposits] = useState([]);
+            const [withdrawals, setWithdrawals] = useState([]);
+            const [matches, setMatches] = useState([]);
+            const [banners, setBanners] = useState([]);
+            const [adminUtrs, setAdminUtrs] = useState([]);
+            const [settings, setSettings] = useState({ upiId: '', qrUrl: '' });
+
+            // Form States
+            const [matchForm, setMatchForm] = useState({ entry: '', win: '', logo: '' });
+            const [bannerForm, setBannerForm] = useState({ imageUrl: '', link: '' });
+            const [utrForm, setUtrForm] = useState({ utr: '', amount: '' });
+
+            // Simple Admin Auth
+            const handleLogin = (e) => {
+                e.preventDefault();
+                if(password === 'Admin@123') setIsAuthorized(true); // Default Password
+                else alert('Wrong Password!');
+            };
+
+            // ---- FETCH DATA LISENERS ----
+            useEffect(() => {
+                if(!isAuthorized || !window.db) return;
+
+                const unsubs = [];
+                // 1. Fetch Deposits
+                unsubs.push(window.fs.onSnapshot(window.fs.collection(window.db, "deposits"), (snap) => {
+                    let deps = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+                    setDeposits(deps.sort((a,b) => b.date - a.date));
+                }));
+
+                // 2. Fetch Withdrawals
+                unsubs.push(window.fs.onSnapshot(window.fs.collection(window.db, "withdrawals"), (snap) => {
+                    let withs = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+                    setWithdrawals(withs.sort((a,b) => b.date - a.date));
+                }));
+
+                // 3. Fetch Matches
+                unsubs.push(window.fs.onSnapshot(window.fs.collection(window.db, "matches"), (snap) => {
+                    setMatches(snap.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+                }));
+
+                // 4. Fetch Banners
+                unsubs.push(window.fs.onSnapshot(window.fs.collection(window.db, "banners"), (snap) => {
+                    setBanners(snap.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+                }));
+
+                // 5. Fetch Admin UTRs
+                unsubs.push(window.fs.onSnapshot(window.fs.collection(window.db, "admin_utrs"), (snap) => {
+                    setAdminUtrs(snap.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+                }));
+
+                // 6. Fetch Settings
+                const fetchSettings = async () => {
+                    const snap = await window.fs.getDoc(window.fs.doc(window.db, "settings", "payment"));
+                    if(snap.exists()) setSettings(snap.data());
+                };
+                fetchSettings();
+
+                return () => unsubs.forEach(unsub => unsub());
+            }, [isAuthorized]);
+
+            // ---- AUTO APPROVE LOGIC ----
+            useEffect(() => {
+                const autoApprove = async () => {
+                    if(deposits.length === 0 || adminUtrs.length === 0) return;
+                    
+                    for (let dep of deposits) {
+                        if (dep.status === 'pending') {
+                            // Find matching UTR that is unused
+                            const match = adminUtrs.find(u => u.utr === dep.utr && u.used === false);
+                            if (match && Number(match.amount) === Number(dep.amount)) {
+                                console.log(`Auto-Approving UTR: ${dep.utr}`);
+                                // 1. Mark Deposit as Approved
+                                await window.fs.updateDoc(window.fs.doc(window.db, "deposits", dep.id), { status: 'approved', note: 'Auto' });
+                                // 2. Mark Admin UTR as Used
+                                await window.fs.updateDoc(window.fs.doc(window.db, "admin_utrs", match.id), { used: true });
+                                // 3. Update User Wallet
+                                const userRef = window.fs.doc(window.db, "users", dep.uid);
+                                const userSnap = await window.fs.getDoc(userRef);
+                                if(userSnap.exists()){
+                                    await window.fs.updateDoc(userRef, { wallet: userSnap.data().wallet + Number(dep.amount) });
+                                }
+                            }
+                        }
+                    }
+                };
+                autoApprove();
+            }, [deposits, adminUtrs]);
+
+
+            // ---- HANDLERS ----
+            const addMatch = async (e) => {
+                e.preventDefault();
+                await window.fs.addDoc(window.fs.collection(window.db, "matches"), { entry: Number(matchForm.entry), win: Number(matchForm.win), logo: matchForm.logo });
+                setMatchForm({ entry: '', win: '', logo: '' });
+                alert("Match Added!");
+            };
+
+            const addBanner = async (e) => {
+                e.preventDefault();
+                await window.fs.addDoc(window.fs.collection(window.db, "banners"), { imageUrl: bannerForm.imageUrl, link: bannerForm.link });
+                setBannerForm({ imageUrl: '', link: '' });
+                alert("Banner Added!");
+            };
+
+            const addUtr = async (e) => {
+                e.preventDefault();
+                await window.fs.addDoc(window.fs.collection(window.db, "admin_utrs"), { utr: utrForm.utr, amount: Number(utrForm.amount), used: false, date: new Date() });
+                setUtrForm({ utr: '', amount: '' });
+                alert("UTR Added for Auto-Approve!");
+            };
+
+            const saveSettings = async (e) => {
+                e.preventDefault();
+                await window.fs.setDoc(window.fs.doc(window.db, "settings", "payment"), settings);
+                alert("Settings Saved!");
+            };
+
+            const deleteItem = async (col, id) => {
+                if(confirm("Are you sure?")) await window.fs.deleteDoc(window.fs.doc(window.db, col, id));
+            };
+
+            // ---- ACTION BUTTONS (APPROVE / REJECT) ----
+            const handleDepositAction = async (dep, action) => {
+                if(confirm(`Are you sure you want to ${action} this deposit?`)){
+                    if(action === 'Approve'){
+                        await window.fs.updateDoc(window.fs.doc(window.db, "deposits", dep.id), { status: 'approved', note: 'Manual' });
+                        const userRef = window.fs.doc(window.db, "users", dep.uid);
+                        const userSnap = await window.fs.getDoc(userRef);
+                        if(userSnap.exists()) await window.fs.updateDoc(userRef, { wallet: userSnap.data().wallet + Number(dep.amount) });
+                    } else {
+                        await window.fs.updateDoc(window.fs.doc(window.db, "deposits", dep.id), { status: 'rejected' });
+                    }
+                }
+            };
+
+            const handleWithdrawAction = async (wit, action) => {
+                if(confirm(`Are you sure you want to ${action} this withdrawal?`)){
+                    if(action === 'Approve'){
+                        await window.fs.updateDoc(window.fs.doc(window.db, "withdrawals", wit.id), { status: 'approved' });
+                        // Money was already deducted from user wallet when requesting
+                    } else {
+                        await window.fs.updateDoc(window.fs.doc(window.db, "withdrawals", wit.id), { status: 'rejected' });
+                        // Refund money to user wallet
+                        const userRef = window.fs.doc(window.db, "users", wit.uid);
+                        const userSnap = await window.fs.getDoc(userRef);
+                        if(userSnap.exists()) await window.fs.updateDoc(userRef, { wallet: userSnap.data().wallet + Number(wit.amount) });
+                    }
+                }
+            };
+
+            // ---- UI VIEWS ----
+            if(!isAuthorized) {
+                return (
+                    <div className="bg-premium-dark flex items-center justify-center min-h-screen">
+                        <div className="gold-card p-8 rounded-3xl w-full max-w-sm text-center">
+                            <i className="fa-solid fa-user-tie text-6xl text-[#dcae45] mb-4"></i>
+                            <h2 className="text-2xl font-black text-white mb-6 uppercase tracking-widest">Admin Login</h2>
+                            <form onSubmit={handleLogin} className="flex flex-col gap-4">
+                                <input type="password" placeholder="Admin Password" value={password} onChange={e=>setPassword(e.target.value)} className="bg-black border border-[#dcae45]/50 p-3 rounded-xl text-white text-center tracking-widest outline-none focus:border-[#dcae45]" required />
+                                <button type="submit" className="btn-gold py-3 rounded-xl uppercase tracking-widest mt-2">Access Panel</button>
+                            </form>
+                        </div>
+                    </div>
+                );
+            }
+
+            return (
+                <div className="bg-premium-dark min-h-screen flex">
+                    
+                    {/* SIDEBAR */}
+                    <div className="w-64 bg-[#0a0a0a] border-r border-[#dcae45]/30 min-h-screen p-4 flex flex-col gap-2 shadow-[4px_0_20px_rgba(220,174,69,0.1)]">
+                        <div className="text-center pb-6 border-b border-[#dcae45]/20 mb-4 mt-2">
+                            <h1 className="text-2xl font-black text-gold-gradient uppercase tracking-wider">Admin Panel</h1>
+                            <p className="text-xs text-gray-400 tracking-widest">Youth Earners</p>
+                        </div>
+
+                        {[
+                            { id: 'dashboard', icon: 'fa-chart-pie', name: 'Dashboard' },
+                            { id: 'matches', icon: 'fa-gamepad', name: 'Matches' },
+                            { id: 'banners', icon: 'fa-image', name: 'Banners' },
+                            { id: 'utrs', icon: 'fa-bolt', name: 'Auto UTRs' },
+                            { id: 'deposits', icon: 'fa-arrow-down', name: 'Deposits' },
+                            { id: 'withdrawals', icon: 'fa-arrow-up', name: 'Withdrawals' },
+                            { id: 'settings', icon: 'fa-gear', name: 'Settings' }
+                        ].map(tab => (
+                            <button key={tab.id} onClick={() => setActiveTab(tab.id)} 
+                                className={`flex items-center gap-3 p-3 rounded-xl transition-all font-bold ${activeTab === tab.id ? 'bg-gradient-to-r from-[#dcae45] to-[#ffe29a] text-black shadow-[0_0_10px_rgba(220,174,69,0.5)]' : 'text-gray-400 hover:bg-[#111] hover:text-[#dcae45]'}`}>
+                                <i className={`fa-solid ${tab.icon} w-6`}></i> {tab.name}
+                            </button>
+                        ))}
+                    </div>
+
+                    {/* MAIN CONTENT AREA */}
+                    <div className="flex-1 p-8 h-screen overflow-y-auto custom-scroll">
+                        
+                        {/* DASHBOARD */}
+                        {activeTab === 'dashboard' && (
+                            <div>
+                                <h2 className="text-3xl font-black text-white mb-6 uppercase">Dashboard Overview</h2>
+                                <div className="grid grid-cols-3 gap-6">
+                                    <div className="gold-card p-6 rounded-2xl flex items-center gap-4">
+                                        <div className="w-14 h-14 bg-[#111] border border-[#dcae45]/50 rounded-full flex items-center justify-center text-2xl text-[#dcae45]"><i className="fa-solid fa-clock"></i></div>
+                                        <div><div className="text-gray-400 text-sm font-bold">Pending Deposits</div><div className="text-3xl font-black text-white">{deposits.filter(d=>d.status==='pending').length}</div></div>
+                                    </div>
+                                    <div className="gold-card p-6 rounded-2xl flex items-center gap-4">
+                                        <div className="w-14 h-14 bg-[#111] border border-[#dcae45]/50 rounded-full flex items-center justify-center text-2xl text-[#dcae45]"><i className="fa-solid fa-money-bill-transfer"></i></div>
+                                        <div><div className="text-gray-400 text-sm font-bold">Pending Withdrawals</div><div className="text-3xl font-black text-white">{withdrawals.filter(w=>w.status==='pending').length}</div></div>
+                                    </div>
+                                    <div className="gold-card p-6 rounded-2xl flex items-center gap-4">
+                                        <div className="w-14 h-14 bg-[#111] border border-[#dcae45]/50 rounded-full flex items-center justify-center text-2xl text-[#dcae45]"><i className="fa-solid fa-bolt"></i></div>
+                                        <div><div className="text-gray-400 text-sm font-bold">Active Auto-UTRs</div><div className="text-3xl font-black text-white">{adminUtrs.filter(u=>!u.used).length}</div></div>
+                                    </div>
+                                </div>
+                            </div>
+                        )}
+
+                        {/* MATCHES */}
+                        {activeTab === 'matches' && (
+                            <div>
+                                <h2 className="text-3xl font-black text-white mb-6 uppercase">Manage Matches</h2>
+                                <form onSubmit={addMatch} className="gold-card p-6 rounded-2xl mb-8 flex gap-4 items-end">
+                                    <div className="flex-1"><label className="text-xs text-gray-400 font-bold">Entry Amount (₹)</label><input type="number" value={matchForm.entry} onChange={e=>setMatchForm({...matchForm, entry:e.target.value})} className="w-full bg-black border border-gray-700 p-3 rounded-lg text-white outline-none focus:border-[#dcae45] mt-1" required/></div>
+                                    <div className="flex-1"><label className="text-xs text-gray-400 font-bold">Winning Amount (₹)</label><input type="number" value={matchForm.win} onChange={e=>setMatchForm({...matchForm, win:e.target.value})} className="w-full bg-black border border-gray-700 p-3 rounded-lg text-white outline-none focus:border-[#dcae45] mt-1" required/></div>
+                                    <div className="flex-[2]"><label className="text-xs text-gray-400 font-bold">Logo Image URL</label><input type="text" value={matchForm.logo} onChange={e=>setMatchForm({...matchForm, logo:e.target.value})} placeholder="https://..." className="w-full bg-black border border-gray-700 p-3 rounded-lg text-white outline-none focus:border-[#dcae45] mt-1" required/></div>
+                                    <button type="submit" className="btn-gold py-3 px-6 rounded-lg h-[50px]"><i className="fa-solid fa-plus"></i> Add Match</button>
+                                </form>
+                                <div className="grid grid-cols-4 gap-4">
+                                    {matches.map(m => (
+                                        <div key={m.id} className="bg-[#111] border border-gray-800 p-4 rounded-xl text-center relative group">
+                                            <button onClick={()=>deleteItem('matches', m.id)} className="absolute top-2 right-2 text-red-500 opacity-0 group-hover:opacity-100 transition"><i className="fa-solid fa-trash"></i></button>
+                                            <img src={m.logo} className="w-12 h-12 mx-auto mb-2 object-contain bg-black p-1 rounded border border-[#dcae45]" />
+                                            <div className="text-gray-400 text-sm">Entry: <span className="text-white font-bold">₹{m.entry}</span></div>
+                                            <div className="text-[#10b981] font-black text-lg">WIN: ₹{m.win}</div>
+                                        </div>
+                                    ))}
+                                </div>
+                            </div>
+                        )}
+
+                        {/* BANNERS */}
+                        {activeTab === 'banners' && (
+                            <div>
+                                <h2 className="text-3xl font-black text-white mb-6 uppercase">Manage Banners</h2>
+                                <form onSubmit={addBanner} className="gold-card p-6 rounded-2xl mb-8 flex gap-4 items-end">
+                                    <div className="flex-1"><label className="text-xs text-gray-400 font-bold">Banner Image URL</label><input type="text" value={bannerForm.imageUrl} onChange={e=>setBannerForm({...bannerForm, imageUrl:e.target.value})} className="w-full bg-black border border-gray-700 p-3 rounded-lg text-white outline-none focus:border-[#dcae45] mt-1" required/></div>
+                                    <div className="flex-1"><label className="text-xs text-gray-400 font-bold">Target Link (Click URL)</label><input type="text" value={bannerForm.link} onChange={e=>setBannerForm({...bannerForm, link:e.target.value})} className="w-full bg-black border border-gray-700 p-3 rounded-lg text-white outline-none focus:border-[#dcae45] mt-1" required/></div>
+                                    <button type="submit" className="btn-gold py-3 px-6 rounded-lg h-[50px]"><i className="fa-solid fa-plus"></i> Add Banner</button>
+                                </form>
+                                <div className="grid grid-cols-2 gap-4">
+                                    {banners.map(b => (
+                                        <div key={b.id} className="bg-[#111] border border-gray-800 p-2 rounded-xl relative group">
+                                            <button onClick={()=>deleteItem('banners', b.id)} className="absolute top-4 right-4 bg-red-500 text-white w-8 h-8 rounded-full opacity-0 group-hover:opacity-100 transition shadow-lg"><i className="fa-solid fa-trash"></i></button>
+                                            <img src={b.imageUrl} className="w-full h-32 object-cover rounded-lg border border-[#dcae45]/30" />
+                                            <p className="text-xs text-gray-400 mt-2 px-2 overflow-hidden text-ellipsis whitespace-nowrap"><i className="fa-solid fa-link text-[#dcae45]"></i> {b.link}</p>
+                                        </div>
+                                    ))}
+                                </div>
+                            </div>
+                        )}
+
+                        {/* ADMIN UTRS (AUTO APPROVAL) */}
+                        {activeTab === 'utrs' && (
+                            <div>
+                                <h2 className="text-3xl font-black text-white mb-2 uppercase">Auto-Approve UTRs</h2>
+                                <p className="text-gray-400 mb-6 text-sm">Add UTRs received in your bank. If a user submits these, they will be auto-approved.</p>
+                                <form onSubmit={addUtr} className="gold-card p-6 rounded-2xl mb-8 flex gap-4 items-end">
+                                    <div className="flex-[2]"><label className="text-xs text-gray-400 font-bold">Transaction ID / UTR</label><input type="text" value={utrForm.utr} onChange={e=>setUtrForm({...utrForm, utr:e.target.value})} className="w-full bg-black border border-gray-700 p-3 rounded-lg text-white outline-none focus:border-[#dcae45] mt-1" required/></div>
+                                    <div className="flex-1"><label className="text-xs text-gray-400 font-bold">Amount Received (₹)</label><input type="number" value={utrForm.amount} onChange={e=>setUtrForm({...utrForm, amount:e.target.value})} className="w-full bg-black border border-gray-700 p-3 rounded-lg text-white outline-none focus:border-[#dcae45] mt-1" required/></div>
+                                    <button type="submit" className="btn-gold py-3 px-6 rounded-lg h-[50px]"><i className="fa-solid fa-plus"></i> Add UTR</button>
+                                </form>
+                                <div className="gold-card rounded-2xl overflow-hidden overflow-x-auto custom-scroll">
+                                    <table className="w-full">
+                                        <thead><tr><th>UTR Number</th><th>Amount</th><th>Status</th><th>Action</th></tr></thead>
+                                        <tbody>
+                                            {adminUtrs.map(u => (
+                                                <tr key={u.id}>
+                                                    <td className="font-mono text-gray-300">{u.utr}</td>
+                                                    <td className="font-bold text-[#dcae45]">₹{u.amount}</td>
+                                                    <td>{u.used ? <span className="bg-gray-800 text-gray-400 px-3 py-1 rounded-full text-xs font-bold">USED</span> : <span className="bg-[#10b981]/20 text-[#10b981] px-3 py-1 rounded-full text-xs font-bold border border-[#10b981]/50">AVAILABLE</span>}</td>
+                                                    <td><button onClick={()=>deleteItem('admin_utrs', u.id)} className="text-red-500 hover:text-red-400"><i className="fa-solid fa-trash"></i></button></td>
+                                                </tr>
+                                            ))}
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </div>
+                        )}
+
+                        {/* DEPOSITS TABLE */}
+                        {activeTab === 'deposits' && (
+                            <div>
+                                <h2 className="text-3xl font-black text-white mb-6 uppercase">Deposit Requests</h2>
+                                <div className="gold-card rounded-2xl overflow-hidden overflow-x-auto custom-scroll">
+                                    <table className="w-full">
+                                        <thead><tr><th>User</th><th>Amount</th><th>UTR</th><th>Status</th><th>Actions</th></tr></thead>
+                                        <tbody>
+                                            {deposits.map(d => (
+                                                <tr key={d.id}>
+                                                    <td><div className="font-bold text-white">{d.name}</div><div className="text-xs text-gray-500">{d.uid.substring(0,8)}...</div></td>
+                                                    <td className="text-xl font-black text-[#10b981]">₹{d.amount}</td>
+                                                    <td className="font-mono text-gray-400">{d.utr}</td>
+                                                    <td>
+                                                        {d.status==='pending' && <span className="text-yellow-500 font-bold"><i className="fa-solid fa-clock"></i> Pending</span>}
+                                                        {d.status==='approved' && <span className="text-emerald-500 font-bold"><i className="fa-solid fa-check"></i> Approved</span>}
+                                                        {d.status==='rejected' && <span className="text-red-500 font-bold"><i className="fa-solid fa-xmark"></i> Rejected</span>}
+                                                        {d.note==='Auto' && <span className="ml-2 bg-[#dcae45] text-black text-[10px] px-2 py-0.5 rounded-full font-bold">AUTO</span>}
+                                                    </td>
+                                                    <td>
+                                                        {d.status === 'pending' && (
+                                                            <div className="flex gap-2">
+                                                                <button onClick={()=>handleDepositAction(d, 'Approve')} className="bg-[#10b981] hover:bg-emerald-400 text-black px-4 py-1.5 rounded font-bold transition">Approve</button>
+                                                                <button onClick={()=>handleDepositAction(d, 'Reject')} className="bg-red-500 hover:bg-red-400 text-white px-4 py-1.5 rounded font-bold transition">Reject</button>
+                                                            </div>
+                                                        )}
+                                                    </td>
+                                                </tr>
+                                            ))}
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </div>
+                        )}
+
+                        {/* WITHDRAWALS TABLE */}
+                        {activeTab === 'withdrawals' && (
+                            <div>
+                                <h2 className="text-3xl font-black text-white mb-6 uppercase">Withdrawal Requests</h2>
+                                <div className="gold-card rounded-2xl overflow-hidden overflow-x-auto custom-scroll">
+                                    <table className="w-full">
+                                        <thead><tr><th>User</th><th>Amount</th><th>Transfer To</th><th>Status</th><th>Actions</th></tr></thead>
+                                        <tbody>
+                                            {withdrawals.map(w => (
+                                                <tr key={w.id}>
+                                                    <td><div className="font-bold text-white">{w.name}</div><div className="text-xs text-gray-500">{w.uid.substring(0,8)}...</div></td>
+                                                    <td className="text-xl font-black text-[#dcae45]">₹{w.amount}</td>
+                                                    <td>
+                                                        <div className="text-xs uppercase text-gray-400 font-bold">{w.type}</div>
+                                                        <div className="font-mono text-white">{w.id}</div>
+                                                    </td>
+                                                    <td>
+                                                        {w.status==='pending' && <span className="text-yellow-500 font-bold"><i className="fa-solid fa-clock"></i> Pending</span>}
+                                                        {w.status==='approved' && <span className="text-emerald-500 font-bold"><i className="fa-solid fa-check"></i> Paid</span>}
+                                                        {w.status==='rejected' && <span className="text-red-500 font-bold"><i className="fa-solid fa-rotate-left"></i> Refunded</span>}
+                                                    </td>
+                                                    <td>
+                                                        {w.status === 'pending' && (
+                                                            <div className="flex gap-2">
+                                                                <button onClick={()=>handleWithdrawAction(w, 'Approve')} className="bg-[#dcae45] hover:bg-[#ffe29a] text-black px-4 py-1.5 rounded font-bold transition">Mark Paid</button>
+                                                                <button onClick={()=>handleWithdrawAction(w, 'Reject')} className="bg-transparent border border-red-500 text-red-500 hover:bg-red-500 hover:text-white px-4 py-1.5 rounded font-bold transition">Reject & Refund</button>
+                                                            </div>
+                                                        )}
+                                                    </td>
+                                                </tr>
+                                            ))}
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </div>
+                        )}
+
+                        {/* SETTINGS */}
+                        {activeTab === 'settings' && (
+                            <div>
+                                <h2 className="text-3xl font-black text-white mb-6 uppercase">App Settings</h2>
+                                <form onSubmit={saveSettings} className="gold-card p-8 rounded-3xl max-w-xl">
+                                    <div className="mb-6">
+                                        <label className="block text-gray-400 font-bold mb-2 uppercase tracking-wide text-sm">Official UPI ID</label>
+                                        <input type="text" value={settings.upiId} onChange={e=>setSettings({...settings, upiId:e.target.value})} className="w-full bg-black border border-gray-700 p-4 rounded-xl text-white outline-none focus:border-[#dcae45] text-lg font-bold" placeholder="youthearners@ybl"/>
+                                    </div>
+                                    <div className="mb-8">
+                                        <label className="block text-gray-400 font-bold mb-2 uppercase tracking-wide text-sm">Payment QR Code Image URL</label>
+                                        <input type="text" value={settings.qrUrl} onChange={e=>setSettings({...settings, qrUrl:e.target.value})} className="w-full bg-black border border-gray-700 p-4 rounded-xl text-white outline-none focus:border-[#dcae45]" placeholder="https://..."/>
+                                        {settings.qrUrl && <img src={settings.qrUrl} className="mt-4 w-32 h-32 border border-[#dcae45] p-2 bg-white rounded-xl" />}
+                                    </div>
+                                    <button type="submit" className="btn-gold w-full py-4 rounded-xl text-xl uppercase tracking-widest"><i className="fa-solid fa-save"></i> Save Settings</button>
+                                </form>
+                            </div>
+                        )}
+                    </div>
+
+                </div>
+            );
+        }
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<AdminApp />);
+    </script>
+</body>
+</html>
