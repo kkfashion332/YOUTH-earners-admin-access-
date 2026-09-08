@@ -1,0 +1,52 @@
+/* GLOBAL ADMIN CSS */
+:root { 
+    --black: #000000; 
+    --dark: #050505;  
+    --gold: #dcae45; 
+    --gold-light: #ffe29a; 
+    --text: #f8fafc; 
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { background: var(--black); color: var(--text); font-family: 'Arial', sans-serif; margin: 0; padding: 0; }
+
+.bg-premium-dark { 
+    background: radial-gradient(ellipse at top, rgba(220, 174, 69, 0.15) 0%, transparent 60%), 
+                radial-gradient(circle at bottom, rgba(220, 174, 69, 0.1) 0%, #000000 60%); 
+    background-color: var(--black); 
+    min-height: 100vh; 
+}
+
+.gold-card { 
+    background: linear-gradient(180deg, #111, #050505); 
+    border: 1px solid rgba(220,174,69,0.4); 
+    box-shadow: 0 0 15px rgba(220,174,69,0.1); 
+    transition: all 0.3s ease; 
+}
+.gold-card:hover { border-color: #dcae45; box-shadow: 0 0 25px rgba(220,174,69,0.3); }
+
+.btn-gold { 
+    background: linear-gradient(90deg, #dcae45, #ffe29a, #dcae45); 
+    color: #000; 
+    font-weight: bold; 
+    border: none; 
+    transition: 0.3s; 
+    background-size: 200% auto; 
+}
+.btn-gold:hover { background-position: right center; }
+.btn-gold:active { transform: scale(0.95); }
+
+.text-gold-gradient { 
+    background: linear-gradient(90deg, #ffe29a, #dcae45); 
+    -webkit-background-clip: text; 
+    -webkit-text-fill-color: transparent; 
+}
+
+/* Custom Scrollbar for tables */
+.custom-scroll::-webkit-scrollbar { height: 8px; width: 8px; }
+.custom-scroll::-webkit-scrollbar-track { background: #111; border-radius: 4px; }
+.custom-scroll::-webkit-scrollbar-thumb { background: #dcae45; border-radius: 4px; }
+
+table { width: 100%; border-collapse: separate; border-spacing: 0; }
+th { background: #111; color: #dcae45; padding: 12px; text-align: left; border-bottom: 2px solid #dcae45; white-space: nowrap; }
+td { padding: 12px; border-bottom: 1px solid #333; white-space: nowrap; }
+tr:hover { background: rgba(220,174,69,0.05); }
