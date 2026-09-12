@@ -9,6 +9,8 @@
     <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
     <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Chart.js for Graphical Representation -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <style>
         body { background-color: #050505; color: #f8fafc; font-family: 'Arial', sans-serif; overflow-x: hidden; }
         .sidebar-active { background: linear-gradient(90deg, rgba(220,174,69,0.15) 0%, transparent 100%); border-left: 4px solid #dcae45; color: #dcae45 !important; }
@@ -21,9 +23,8 @@
 
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.1/firebase-app.js";
-        import { getFirestore, collection, query, where, getDocs, doc, getDoc, updateDoc, addDoc, deleteDoc, onSnapshot } from "https://www.gstatic.com/firebasejs/10.8.1/firebase-firestore.js";
+        import { getFirestore, collection, query, where, getDocs, doc, getDoc, updateDoc, addDoc, deleteDoc, onSnapshot, setDoc } from "https://www.gstatic.com/firebasejs/10.8.1/firebase-firestore.js";
 
-        // तुम्हारा असली Firebase Config
         const firebaseConfig = {
             apiKey: "AIzaSyA4pTWtUMbZFhrMORZibUhV7gpPRy6DreY",
             authDomain: "youth-earners-d34ca.firebaseapp.com",
@@ -35,25 +36,34 @@
 
         const app = initializeApp(firebaseConfig);
         window.db = getFirestore(app);
-        window.fs = { collection, query, where, getDocs, doc, getDoc, updateDoc, addDoc, deleteDoc, onSnapshot };
+        window.fs = { collection, query, where, getDocs, doc, getDoc, updateDoc, addDoc, deleteDoc, onSnapshot, setDoc };
     </script>
 
     <script type="text/babel">
-        const { useState, useEffect } = React;
+        const { useState, useEffect, useRef } = React;
 
         function AdminPanel() {
             const [activeTab, setActiveTab] = useState('dashboard');
             
-            // State variables
+            // Layout States for Horizontal Sub-tabs
+            const [depTab, setDepTab] = useState('pending'); // pending, approved, rejected
+            const [withTab, setWithTab] = useState('pending');
+            
             const [deposits, setDeposits] = useState([]);
             const [withdrawals, setWithdrawals] = useState([]);
             const [autoUtrs, setAutoUtrs] = useState([]);
             const [matches, setMatches] = useState([]);
             
-            // Inputs
             const [newUtr, setNewUtr] = useState('');
+            const [newUtrAmount, setNewUtrAmount] = useState('');
             const [matchEntry, setMatchEntry] = useState('');
             const [matchWin, setMatchWin] = useState('');
+            
+            // Settings State
+            const [settings, setSettings] = useState({ upiId: 'youthearners@nyes', qrUrl: 'payment-qr.png' });
+
+            const chartRef = useRef(null);
+            const chartInstance = useRef(null);
 
             // ==========================================
             // REAL-TIME DATABASE LISTENERS
@@ -61,21 +71,19 @@
             useEffect(() => {
                 if(!window.fs) return;
                 
-                // Live Pending Deposits
-                const qDep = window.fs.query(window.fs.collection(window.db, "deposits"), window.fs.where("status", "==", "pending"));
-                const unsubDep = window.fs.onSnapshot(qDep, (snap) => {
+                // Live All Deposits
+                const unsubDep = window.fs.onSnapshot(window.fs.collection(window.db, "deposits"), (snap) => {
                     let d = []; snap.forEach(doc => d.push({ id: doc.id, ...doc.data() }));
                     setDeposits(d);
                 });
 
-                // Live Pending Withdrawals
-                const qWith = window.fs.query(window.fs.collection(window.db, "withdrawals"), window.fs.where("status", "==", "pending"));
-                const unsubWith = window.fs.onSnapshot(qWith, (snap) => {
+                // Live All Withdrawals
+                const unsubWith = window.fs.onSnapshot(window.fs.collection(window.db, "withdrawals"), (snap) => {
                     let w = []; snap.forEach(doc => w.push({ id: doc.id, ...doc.data() }));
                     setWithdrawals(w);
                 });
 
-                // Live Auto UTRs (Unused)
+                // Live Auto UTRs
                 const qUtr = window.fs.query(window.fs.collection(window.db, "auto_utrs"), window.fs.where("used", "==", false));
                 const unsubUtr = window.fs.onSnapshot(qUtr, (snap) => {
                     let u = []; snap.forEach(doc => u.push({ id: doc.id, ...doc.data() }));
@@ -88,25 +96,60 @@
                     m.sort((a,b) => a.entry - b.entry);
                     setMatches(m);
                 });
+                
+                // Fetch Settings
+                const fetchSettings = async () => {
+                    const docSnap = await window.fs.getDoc(window.fs.doc(window.db, "admin_settings", "payment"));
+                    if(docSnap.exists()) setSettings(docSnap.data());
+                };
+                fetchSettings();
 
                 return () => { unsubDep(); unsubWith(); unsubUtr(); unsubMatches(); };
             }, []);
 
             // ==========================================
+            // GRAPHICAL CHART INITIALIZATION
+            // ==========================================
+            useEffect(() => {
+                if (activeTab === 'dashboard' && chartRef.current) {
+                    if (chartInstance.current) chartInstance.current.destroy();
+                    const ctx = chartRef.current.getContext('2d');
+                    
+                    const approvedDeps = deposits.filter(d => d.status === 'approved').reduce((sum, d) => sum + Number(d.amount), 0);
+                    const approvedWiths = withdrawals.filter(w => w.status === 'approved').reduce((sum, w) => sum + Number(w.amount), 0);
+
+                    chartInstance.current = new Chart(ctx, {
+                        type: 'doughnut',
+                        data: {
+                            labels: ['Total Deposits (₹)', 'Total Withdrawals (₹)'],
+                            datasets: [{
+                                data: [approvedDeps, approvedWiths],
+                                backgroundColor: ['#10b981', '#f43f5e'],
+                                borderColor: '#050505',
+                                borderWidth: 4
+                            }]
+                        },
+                        options: {
+                            responsive: true, maintainAspectRatio: false,
+                            plugins: { legend: { position: 'bottom', labels: { color: '#f8fafc', font: { weight: 'bold' } } } }
+                        }
+                    });
+                }
+            }, [activeTab, deposits, withdrawals]);
+
+            // ==========================================
             // DEPOSIT & REFERRAL LOGIC
             // ==========================================
-            const approveDeposit = async (dep, isAuto = false) => {
-                if(!isAuto && !confirm(`Approve ₹${dep.amount} for ${dep.name}?`)) return;
+            const approveDeposit = async (dep) => {
+                if(!confirm(`Approve ₹${dep.amount} for ${dep.name}?`)) return;
                 try {
                     await window.fs.updateDoc(window.fs.doc(window.db, "deposits", dep.id), { status: 'approved' });
-
                     const userRef = window.fs.doc(window.db, "users", dep.uid);
                     const userSnap = await window.fs.getDoc(userRef);
                     if (userSnap.exists()) {
                         const userData = userSnap.data();
                         await window.fs.updateDoc(userRef, { wallet: Number(userData.wallet || 0) + Number(dep.amount) });
 
-                        // AUTO REFERRAL ₹10 REWARD (Min ₹30 condition)
                         if (dep.amount >= 30 && userData.referralUsed && !userData.referralRewardGiven) {
                             const usersSnap = await window.fs.getDocs(window.fs.collection(window.db, "users"));
                             let referrerDoc = null; let referrerData = null;
@@ -115,15 +158,13 @@
                                 const expectedCode = "YE-" + (u.number ? u.number.slice(-4) : "9999");
                                 if(expectedCode === userData.referralUsed) { referrerDoc = uDoc; referrerData = u; }
                             });
-
                             if(referrerDoc && referrerData) {
                                 await window.fs.updateDoc(window.fs.doc(window.db, "users", referrerDoc.id), { wallet: Number(referrerData.wallet || 0) + 10 });
                                 await window.fs.updateDoc(userRef, { referralRewardGiven: true });
-                                if(!isAuto) alert("Success! ₹10 Referral Bonus sent automatically.");
                             }
                         }
                     }
-                    if(!isAuto) alert("Deposit Approved!");
+                    alert("Deposit Approved!");
                 } catch(e) { console.error(e); alert("Error approving deposit!"); }
             };
 
@@ -158,31 +199,17 @@
             // AUTO UTR LOGIC
             // ==========================================
             const addAutoUtr = async () => {
-                if(newUtr.length < 6) return alert("Enter valid UTR.");
-                await window.fs.addDoc(window.fs.collection(window.db, "auto_utrs"), { utr: newUtr, used: false, addedAt: new Date() });
-                setNewUtr(''); alert("Auto UTR Added!");
+                if(newUtr.length < 6 || !newUtrAmount) return alert("Enter valid UTR and Amount.");
+                await window.fs.addDoc(window.fs.collection(window.db, "auto_utrs"), { utr: newUtr, amount: Number(newUtrAmount), used: false, addedAt: new Date() });
+                setNewUtr(''); setNewUtrAmount(''); alert("Auto UTR Added Successfully!");
             };
 
             const deleteAutoUtr = async (id) => {
                 if(confirm("Delete this UTR?")) await window.fs.deleteDoc(window.fs.doc(window.db, "auto_utrs", id));
             };
 
-            const runAutoVerification = async () => {
-                let approvedCount = 0;
-                for (let dep of deposits) {
-                    let matchUtr = autoUtrs.find(u => u.utr === dep.utr);
-                    if (matchUtr) {
-                        await approveDeposit(dep, true); // Auto approve
-                        await window.fs.updateDoc(window.fs.doc(window.db, "auto_utrs", matchUtr.id), { used: true }); // Mark UTR used
-                        approvedCount++;
-                    }
-                }
-                if(approvedCount > 0) alert(`${approvedCount} Deposits Auto-Approved successfully!`);
-                else alert("No matching UTRs found for pending deposits.");
-            };
-
             // ==========================================
-            // MATCHES LOGIC
+            // MATCHES & SETTINGS LOGIC
             // ==========================================
             const addMatch = async () => {
                 if(!matchEntry || !matchWin) return alert("Fill entry and win amount");
@@ -195,13 +222,21 @@
             const deleteMatch = async (id) => {
                 if(confirm("Delete this match?")) await window.fs.deleteDoc(window.fs.doc(window.db, "match_tiers", id));
             };
+            
+            const saveSettings = async () => {
+                try {
+                    await window.fs.setDoc(window.fs.doc(window.db, "admin_settings", "payment"), settings);
+                    alert("Settings Updated Successfully!");
+                } catch(e) { alert("Error updating settings!"); }
+            };
 
-            // ==========================================
-            // RENDER UI
-            // ==========================================
+            // Filtering Data based on Tabs
+            const filteredDeposits = deposits.filter(d => d.status === depTab).sort((a,b) => (b.date?.toDate() || 0) - (a.date?.toDate() || 0));
+            const filteredWithdrawals = withdrawals.filter(w => w.status === withTab).sort((a,b) => (b.date?.toDate() || 0) - (a.date?.toDate() || 0));
+
             return (
                 <div className="flex h-screen overflow-hidden">
-                    {/* SIDEBAR (Matches Screenshot exactly) */}
+                    {/* SIDEBAR */}
                     <div className="w-64 bg-[#0a0a0a] border-r border-gray-800 flex flex-col h-full z-20">
                         <div className="p-6 text-center border-b border-gray-800">
                             <h2 className="text-[#dcae45] text-xl font-black tracking-widest">ADMIN PANEL</h2>
@@ -209,132 +244,139 @@
                         </div>
                         
                         <div className="flex-1 py-4 space-y-1">
-                            <button onClick={()=>setActiveTab('dashboard')} className={`w-full text-left px-6 py-4 text-sm font-bold text-gray-400 hover:text-white transition flex items-center gap-4 ${activeTab==='dashboard'?'sidebar-active':''}`}>
-                                <i className="fa-solid fa-chart-pie w-5 text-center"></i> Dashboard
-                            </button>
-                            <button onClick={()=>setActiveTab('matches')} className={`w-full text-left px-6 py-4 text-sm font-bold text-gray-400 hover:text-white transition flex items-center gap-4 ${activeTab==='matches'?'sidebar-active':''}`}>
-                                <i className="fa-solid fa-gamepad w-5 text-center"></i> Matches
-                            </button>
-                            <button onClick={()=>setActiveTab('autoUtrs')} className={`w-full text-left px-6 py-4 text-sm font-bold text-gray-400 hover:text-white transition flex items-center gap-4 ${activeTab==='autoUtrs'?'sidebar-active':''}`}>
-                                <i className="fa-solid fa-bolt w-5 text-center"></i> Auto UTRs
-                            </button>
-                            <button onClick={()=>setActiveTab('deposits')} className={`w-full text-left px-6 py-4 text-sm font-bold text-gray-400 hover:text-white transition flex items-center gap-4 ${activeTab==='deposits'?'sidebar-active':''}`}>
-                                <i className="fa-solid fa-arrow-down w-5 text-center"></i> Deposits {deposits.length>0 && <span className="bg-red-500 text-white text-[10px] px-2 py-0.5 rounded-full">{deposits.length}</span>}
-                            </button>
-                            <button onClick={()=>setActiveTab('withdrawals')} className={`w-full text-left px-6 py-4 text-sm font-bold text-gray-400 hover:text-white transition flex items-center gap-4 ${activeTab==='withdrawals'?'sidebar-active':''}`}>
-                                <i className="fa-solid fa-arrow-up w-5 text-center"></i> Withdrawals {withdrawals.length>0 && <span className="bg-red-500 text-white text-[10px] px-2 py-0.5 rounded-full">{withdrawals.length}</span>}
-                            </button>
-                            <button onClick={()=>setActiveTab('settings')} className={`w-full text-left px-6 py-4 text-sm font-bold text-gray-400 hover:text-white transition flex items-center gap-4 ${activeTab==='settings'?'sidebar-active':''}`}>
-                                <i className="fa-solid fa-gear w-5 text-center"></i> Settings
-                            </button>
+                            <button onClick={()=>setActiveTab('dashboard')} className={`w-full text-left px-6 py-4 text-sm font-bold text-gray-400 hover:text-white transition flex items-center gap-4 ${activeTab==='dashboard'?'sidebar-active':''}`}><i className="fa-solid fa-chart-pie w-5 text-center"></i> Dashboard</button>
+                            <button onClick={()=>setActiveTab('matches')} className={`w-full text-left px-6 py-4 text-sm font-bold text-gray-400 hover:text-white transition flex items-center gap-4 ${activeTab==='matches'?'sidebar-active':''}`}><i className="fa-solid fa-gamepad w-5 text-center"></i> Matches</button>
+                            <button onClick={()=>setActiveTab('autoUtrs')} className={`w-full text-left px-6 py-4 text-sm font-bold text-gray-400 hover:text-white transition flex items-center gap-4 ${activeTab==='autoUtrs'?'sidebar-active':''}`}><i className="fa-solid fa-bolt w-5 text-center"></i> Auto UTRs</button>
+                            <button onClick={()=>setActiveTab('deposits')} className={`w-full text-left px-6 py-4 text-sm font-bold text-gray-400 hover:text-white transition flex items-center gap-4 ${activeTab==='deposits'?'sidebar-active':''}`}><i className="fa-solid fa-arrow-down w-5 text-center"></i> Deposits {deposits.filter(d=>d.status==='pending').length>0 && <span className="bg-red-500 text-white text-[10px] px-2 py-0.5 rounded-full">{deposits.filter(d=>d.status==='pending').length}</span>}</button>
+                            <button onClick={()=>setActiveTab('withdrawals')} className={`w-full text-left px-6 py-4 text-sm font-bold text-gray-400 hover:text-white transition flex items-center gap-4 ${activeTab==='withdrawals'?'sidebar-active':''}`}><i className="fa-solid fa-arrow-up w-5 text-center"></i> Withdrawals {withdrawals.filter(w=>w.status==='pending').length>0 && <span className="bg-red-500 text-white text-[10px] px-2 py-0.5 rounded-full">{withdrawals.filter(w=>w.status==='pending').length}</span>}</button>
+                            <button onClick={()=>setActiveTab('settings')} className={`w-full text-left px-6 py-4 text-sm font-bold text-gray-400 hover:text-white transition flex items-center gap-4 ${activeTab==='settings'?'sidebar-active':''}`}><i className="fa-solid fa-gear w-5 text-center"></i> Settings</button>
                         </div>
                     </div>
 
                     {/* MAIN CONTENT */}
                     <div className="flex-1 h-full overflow-y-auto bg-[#050505] p-8 hide-scrollbar relative">
                         
-                        {/* HEADER */}
                         <div className="mb-8">
                             <h1 className="text-2xl font-black text-white uppercase tracking-widest border-b-2 border-[#dcae45] inline-block pb-2">
                                 {activeTab.replace(/([A-Z])/g, ' $1').trim()} {activeTab === 'dashboard' && 'OVERVIEW'}
                             </h1>
                         </div>
 
-                        {/* DASHBOARD TAB */}
+                        {/* DASHBOARD TAB WITH GRAPHICS */}
                         {activeTab === 'dashboard' && (
-                            <div className="grid grid-cols-3 gap-6">
-                                <div className="bg-[#111] border border-gray-800 p-6 rounded-2xl gold-glow flex items-center gap-6">
-                                    <div className="w-14 h-14 rounded-full bg-yellow-500/10 text-yellow-500 flex items-center justify-center text-2xl"><i className="fa-solid fa-clock"></i></div>
-                                    <div>
-                                        <p className="text-gray-500 text-xs font-bold uppercase tracking-widest">Pending Deposits</p>
-                                        <h2 className="text-4xl font-black text-white">{deposits.length}</h2>
+                            <div>
+                                <div className="grid grid-cols-3 gap-6 mb-8">
+                                    <div className="bg-[#111] border border-gray-800 p-6 rounded-2xl gold-glow flex items-center gap-6">
+                                        <div className="w-14 h-14 rounded-full bg-yellow-500/10 text-yellow-500 flex items-center justify-center text-2xl"><i className="fa-solid fa-clock"></i></div>
+                                        <div><p className="text-gray-500 text-xs font-bold uppercase tracking-widest">Pending Deposits</p><h2 className="text-4xl font-black text-white">{deposits.filter(d=>d.status==='pending').length}</h2></div>
+                                    </div>
+                                    <div className="bg-[#111] border border-gray-800 p-6 rounded-2xl gold-glow flex items-center gap-6">
+                                        <div className="w-14 h-14 rounded-full bg-rose-500/10 text-rose-500 flex items-center justify-center text-2xl"><i className="fa-solid fa-money-bill-transfer"></i></div>
+                                        <div><p className="text-gray-500 text-xs font-bold uppercase tracking-widest">Pending Withdrawals</p><h2 className="text-4xl font-black text-white">{withdrawals.filter(w=>w.status==='pending').length}</h2></div>
+                                    </div>
+                                    <div className="bg-[#111] border border-gray-800 p-6 rounded-2xl gold-glow flex items-center gap-6">
+                                        <div className="w-14 h-14 rounded-full bg-[#10b981]/10 text-[#10b981] flex items-center justify-center text-2xl"><i className="fa-solid fa-bolt"></i></div>
+                                        <div><p className="text-gray-500 text-xs font-bold uppercase tracking-widest">Active Auto-UTRs</p><h2 className="text-4xl font-black text-white">{autoUtrs.length}</h2></div>
                                     </div>
                                 </div>
-                                <div className="bg-[#111] border border-gray-800 p-6 rounded-2xl gold-glow flex items-center gap-6">
-                                    <div className="w-14 h-14 rounded-full bg-rose-500/10 text-rose-500 flex items-center justify-center text-2xl"><i className="fa-solid fa-money-bill-transfer"></i></div>
-                                    <div>
-                                        <p className="text-gray-500 text-xs font-bold uppercase tracking-widest">Pending Withdrawals</p>
-                                        <h2 className="text-4xl font-black text-white">{withdrawals.length}</h2>
-                                    </div>
-                                </div>
-                                <div className="bg-[#111] border border-gray-800 p-6 rounded-2xl gold-glow flex items-center gap-6">
-                                    <div className="w-14 h-14 rounded-full bg-[#10b981]/10 text-[#10b981] flex items-center justify-center text-2xl"><i className="fa-solid fa-bolt"></i></div>
-                                    <div>
-                                        <p className="text-gray-500 text-xs font-bold uppercase tracking-widest">Active Auto-UTRs</p>
-                                        <h2 className="text-4xl font-black text-white">{autoUtrs.length}</h2>
-                                    </div>
+                                <div className="bg-[#111] border border-gray-800 p-6 rounded-2xl w-full max-w-2xl mx-auto h-[400px]">
+                                    <h3 className="text-center text-gray-400 font-bold tracking-widest uppercase mb-4">Financial Overview</h3>
+                                    <canvas ref={chartRef}></canvas>
                                 </div>
                             </div>
                         )}
 
-                        {/* DEPOSITS TAB */}
+                        {/* DEPOSITS TAB (With Horizontal Options) */}
                         {activeTab === 'deposits' && (
-                            <div className="space-y-4">
-                                {deposits.length === 0 && <p className="text-gray-500 font-bold">No pending deposits.</p>}
-                                {deposits.map(dep => (
-                                    <div key={dep.id} className="bg-[#111] border border-gray-800 p-5 rounded-2xl flex justify-between items-center hover:border-[#dcae45]/50 transition">
-                                        <div>
-                                            <h3 className="text-xl font-bold text-white mb-1">{dep.name}</h3>
-                                            <p className="text-gray-400 text-sm font-bold mb-1">UTR: <span className="text-[#ffe29a] tracking-widest">{dep.utr}</span></p>
-                                            <p className="text-gray-500 text-xs">{dep.date ? new Date(dep.date.toDate()).toLocaleString() : ''}</p>
-                                        </div>
-                                        <div className="text-right">
-                                            <div className="text-3xl font-black text-[#10b981] mb-3">+₹{dep.amount}</div>
-                                            <div className="flex gap-2">
-                                                <button onClick={() => rejectDeposit(dep.id)} className="bg-rose-500/10 text-rose-500 px-4 py-2 rounded-lg font-bold hover:bg-rose-500 hover:text-white transition"><i className="fa-solid fa-xmark"></i></button>
-                                                <button onClick={() => approveDeposit(dep)} className="bg-[#10b981] text-black px-6 py-2 rounded-lg font-black hover:scale-105 transition"><i className="fa-solid fa-check mr-2"></i> Approve</button>
+                            <div>
+                                <div className="flex gap-4 mb-6 border-b border-gray-800 pb-4">
+                                    <button onClick={() => setDepTab('pending')} className={`px-6 py-2 rounded-lg font-bold text-sm transition ${depTab === 'pending' ? 'bg-[#dcae45] text-black shadow-[0_0_10px_rgba(220,174,69,0.5)]' : 'bg-transparent text-gray-500 hover:text-white'}`}>Pending</button>
+                                    <button onClick={() => setDepTab('approved')} className={`px-6 py-2 rounded-lg font-bold text-sm transition ${depTab === 'approved' ? 'bg-[#10b981] text-black shadow-[0_0_10px_rgba(16,185,129,0.5)]' : 'bg-transparent text-gray-500 hover:text-white'}`}>Approved</button>
+                                    <button onClick={() => setDepTab('rejected')} className={`px-6 py-2 rounded-lg font-bold text-sm transition ${depTab === 'rejected' ? 'bg-rose-500 text-white shadow-[0_0_10px_rgba(244,63,94,0.5)]' : 'bg-transparent text-gray-500 hover:text-white'}`}>Rejected / Cancelled</button>
+                                </div>
+                                <div className="space-y-4">
+                                    {filteredDeposits.length === 0 && <p className="text-gray-500 font-bold">No {depTab} deposits found.</p>}
+                                    {filteredDeposits.map(dep => (
+                                        <div key={dep.id} className="bg-[#111] border border-gray-800 p-5 rounded-2xl flex justify-between items-center hover:border-[#dcae45]/50 transition">
+                                            <div>
+                                                <h3 className="text-xl font-bold text-white mb-1">{dep.name}</h3>
+                                                <p className="text-gray-400 text-sm font-bold mb-1">UTR: <span className="text-[#ffe29a] tracking-widest">{dep.utr}</span></p>
+                                                <p className="text-gray-500 text-xs">{dep.date ? new Date(dep.date.toDate()).toLocaleString() : ''}</p>
+                                            </div>
+                                            <div className="text-right">
+                                                <div className={`text-3xl font-black mb-3 ${dep.status === 'rejected' ? 'text-gray-500 line-through' : 'text-[#10b981]'}`}>+₹{dep.amount}</div>
+                                                {dep.status === 'pending' ? (
+                                                    <div className="flex gap-2">
+                                                        <button onClick={() => rejectDeposit(dep.id)} className="bg-rose-500/10 text-rose-500 px-4 py-2 rounded-lg font-bold hover:bg-rose-500 hover:text-white transition"><i className="fa-solid fa-xmark"></i></button>
+                                                        <button onClick={() => approveDeposit(dep)} className="bg-[#10b981] text-black px-6 py-2 rounded-lg font-black hover:scale-105 transition"><i className="fa-solid fa-check mr-2"></i> Approve</button>
+                                                    </div>
+                                                ) : (
+                                                    <span className={`text-xs font-black uppercase px-3 py-1 rounded-full ${dep.status === 'approved' ? 'bg-[#10b981]/20 text-[#10b981]' : 'bg-rose-500/20 text-rose-500'}`}>{dep.status}</span>
+                                                )}
                                             </div>
                                         </div>
-                                    </div>
-                                ))}
+                                    ))}
+                                </div>
                             </div>
                         )}
 
-                        {/* WITHDRAWALS TAB */}
+                        {/* WITHDRAWALS TAB (With Horizontal Options) */}
                         {activeTab === 'withdrawals' && (
-                            <div className="space-y-4">
-                                {withdrawals.length === 0 && <p className="text-gray-500 font-bold">No pending withdrawals.</p>}
-                                {withdrawals.map(w => (
-                                    <div key={w.id} className="bg-[#111] border border-gray-800 p-5 rounded-2xl flex justify-between items-center hover:border-[#dcae45]/50 transition">
-                                        <div>
-                                            <h3 className="text-xl font-bold text-white mb-1">{w.name}</h3>
-                                            <p className="text-gray-400 text-sm font-bold uppercase mb-1">{w.type}: <span className="text-white tracking-widest">{w.id}</span></p>
-                                            <p className="text-gray-500 text-xs">{w.date ? new Date(w.date.toDate()).toLocaleString() : ''}</p>
-                                        </div>
-                                        <div className="text-right">
-                                            <div className="text-3xl font-black text-rose-500 mb-3">-₹{w.amount}</div>
-                                            <div className="flex gap-2">
-                                                <button onClick={() => rejectWithdrawal(w)} className="bg-rose-500/10 text-rose-500 px-4 py-2 rounded-lg font-bold hover:bg-rose-500 hover:text-white transition" title="Reject & Refund"><i className="fa-solid fa-rotate-left mr-1"></i> Refund</button>
-                                                <button onClick={() => approveWithdrawal(w.id)} className="bg-[#dcae45] text-black px-6 py-2 rounded-lg font-black hover:scale-105 transition"><i className="fa-solid fa-check mr-2"></i> Mark Paid</button>
+                            <div>
+                                <div className="flex gap-4 mb-6 border-b border-gray-800 pb-4">
+                                    <button onClick={() => setWithTab('pending')} className={`px-6 py-2 rounded-lg font-bold text-sm transition ${withTab === 'pending' ? 'bg-[#dcae45] text-black shadow-[0_0_10px_rgba(220,174,69,0.5)]' : 'bg-transparent text-gray-500 hover:text-white'}`}>Pending</button>
+                                    <button onClick={() => setWithTab('approved')} className={`px-6 py-2 rounded-lg font-bold text-sm transition ${withTab === 'approved' ? 'bg-[#10b981] text-black shadow-[0_0_10px_rgba(16,185,129,0.5)]' : 'bg-transparent text-gray-500 hover:text-white'}`}>Successfully Paid</button>
+                                    <button onClick={() => setWithTab('rejected')} className={`px-6 py-2 rounded-lg font-bold text-sm transition ${withTab === 'rejected' ? 'bg-rose-500 text-white shadow-[0_0_10px_rgba(244,63,94,0.5)]' : 'bg-transparent text-gray-500 hover:text-white'}`}>Rejected / Refunded</button>
+                                </div>
+                                <div className="space-y-4">
+                                    {filteredWithdrawals.length === 0 && <p className="text-gray-500 font-bold">No {withTab} withdrawals found.</p>}
+                                    {filteredWithdrawals.map(w => (
+                                        <div key={w.id} className="bg-[#111] border border-gray-800 p-5 rounded-2xl flex justify-between items-center hover:border-[#dcae45]/50 transition">
+                                            <div>
+                                                <h3 className="text-xl font-bold text-white mb-1">{w.name}</h3>
+                                                <p className="text-gray-400 text-sm font-bold uppercase mb-1">{w.type}: <span className="text-white tracking-widest">{w.id}</span></p>
+                                                <p className="text-gray-500 text-xs">{w.date ? new Date(w.date.toDate()).toLocaleString() : ''}</p>
+                                            </div>
+                                            <div className="text-right">
+                                                <div className={`text-3xl font-black mb-3 ${w.status === 'rejected' ? 'text-gray-500 line-through' : 'text-rose-500'}`}>-₹{w.amount}</div>
+                                                {w.status === 'pending' ? (
+                                                    <div className="flex gap-2">
+                                                        <button onClick={() => rejectWithdrawal(w)} className="bg-rose-500/10 text-rose-500 px-4 py-2 rounded-lg font-bold hover:bg-rose-500 hover:text-white transition" title="Reject & Refund"><i className="fa-solid fa-rotate-left mr-1"></i> Refund</button>
+                                                        <button onClick={() => approveWithdrawal(w.id)} className="bg-[#dcae45] text-black px-6 py-2 rounded-lg font-black hover:scale-105 transition"><i className="fa-solid fa-check mr-2"></i> Mark Paid</button>
+                                                    </div>
+                                                ) : (
+                                                    <span className={`text-xs font-black uppercase px-3 py-1 rounded-full ${w.status === 'approved' ? 'bg-[#10b981]/20 text-[#10b981]' : 'bg-rose-500/20 text-rose-500'}`}>{w.status}</span>
+                                                )}
                                             </div>
                                         </div>
-                                    </div>
-                                ))}
+                                    ))}
+                                </div>
                             </div>
                         )}
 
-                        {/* AUTO UTRS TAB */}
+                        {/* AUTO UTRS TAB (Amount Added) */}
                         {activeTab === 'autoUtrs' && (
                             <div>
                                 <div className="bg-[#111] border border-[#dcae45] p-6 rounded-2xl mb-8 flex gap-4 items-end">
-                                    <div className="flex-1">
+                                    <div className="flex-[2]">
                                         <label className="text-gray-400 text-xs font-bold uppercase tracking-widest block mb-2">Add New UTR from Bank SMS</label>
                                         <input type="text" value={newUtr} onChange={e=>setNewUtr(e.target.value)} className="w-full bg-black border border-gray-700 p-3 rounded-xl text-white focus:border-[#dcae45] outline-none" placeholder="Enter 12-Digit UTR" />
                                     </div>
+                                    <div className="flex-1">
+                                        <label className="text-gray-400 text-xs font-bold uppercase tracking-widest block mb-2">Amount (₹)</label>
+                                        <input type="number" value={newUtrAmount} onChange={e=>setNewUtrAmount(e.target.value)} className="w-full bg-black border border-gray-700 p-3 rounded-xl text-white focus:border-[#dcae45] outline-none" placeholder="e.g. 50" />
+                                    </div>
                                     <button onClick={addAutoUtr} className="bg-[#dcae45] text-black px-8 py-3 rounded-xl font-black hover:bg-[#ffe29a] transition"><i className="fa-solid fa-plus"></i> Add</button>
-                                    
-                                    {/* MAGICAL AUTO-VERIFY BUTTON */}
-                                    <button onClick={runAutoVerification} className="bg-[#10b981] text-black px-8 py-3 rounded-xl font-black hover:scale-105 transition shadow-[0_0_15px_rgba(16,185,129,0.4)] ml-4">
-                                        <i className="fa-solid fa-wand-magic-sparkles mr-2"></i> Scan & Verify
-                                    </button>
                                 </div>
-
                                 <h3 className="text-gray-400 font-bold uppercase tracking-widest text-sm mb-4">Unused Auto UTRs ({autoUtrs.length})</h3>
                                 <div className="grid grid-cols-2 gap-4">
                                     {autoUtrs.map(u => (
                                         <div key={u.id} className="bg-[#111] border border-gray-800 p-4 rounded-xl flex justify-between items-center">
-                                            <span className="text-xl font-black tracking-widest text-[#ffe29a]">{u.utr}</span>
-                                            <button onClick={() => deleteAutoUtr(u.id)} className="text-rose-500 hover:text-rose-400"><i className="fa-solid fa-trash"></i></button>
+                                            <div>
+                                                <span className="text-xl font-black tracking-widest text-[#ffe29a] block">{u.utr}</span>
+                                                <span className="text-sm font-bold text-[#10b981]">₹{u.amount}</span>
+                                            </div>
+                                            <button onClick={() => deleteAutoUtr(u.id)} className="text-rose-500 hover:text-rose-400 text-xl"><i className="fa-solid fa-trash"></i></button>
                                         </div>
                                     ))}
                                 </div>
@@ -369,12 +411,23 @@
                             </div>
                         )}
 
-                        {/* SETTINGS TAB */}
+                        {/* SETTINGS TAB (UPI & QR) */}
                         {activeTab === 'settings' && (
-                            <div className="bg-[#111] border border-gray-800 p-8 rounded-2xl text-center">
-                                <i className="fa-solid fa-gear text-6xl text-[#dcae45] mb-4 spin-slow"></i>
-                                <h2 className="text-2xl font-black text-white uppercase tracking-widest mb-2">System Settings</h2>
-                                <p className="text-gray-400">Admin settings and configuration will be available here.</p>
+                            <div className="bg-[#111] border border-gray-800 p-8 rounded-2xl max-w-2xl mx-auto">
+                                <h2 className="text-2xl font-black text-white uppercase tracking-widest mb-6"><i className="fa-solid fa-gear text-[#dcae45] mr-2"></i> Payment Settings</h2>
+                                
+                                <div className="space-y-6">
+                                    <div>
+                                        <label className="text-gray-400 text-sm font-bold uppercase tracking-widest block mb-2">Your UPI ID</label>
+                                        <input type="text" value={settings.upiId} onChange={e => setSettings({...settings, upiId: e.target.value})} className="w-full bg-black border border-gray-700 p-4 rounded-xl text-white focus:border-[#dcae45] outline-none font-bold" placeholder="e.g. youthearners@nyes" />
+                                    </div>
+                                    <div>
+                                        <label className="text-gray-400 text-sm font-bold uppercase tracking-widest block mb-2">QR Code Image Name/URL</label>
+                                        <input type="text" value={settings.qrUrl} onChange={e => setSettings({...settings, qrUrl: e.target.value})} className="w-full bg-black border border-gray-700 p-4 rounded-xl text-white focus:border-[#dcae45] outline-none font-bold" placeholder="e.g. payment-qr.png" />
+                                        <p className="text-xs text-gray-500 mt-2">* Note: Ensure the image file exists in your repository (like payment-qr.png) or use a direct web link.</p>
+                                    </div>
+                                    <button onClick={saveSettings} className="w-full bg-[#dcae45] text-black px-8 py-4 rounded-xl font-black hover:bg-[#ffe29a] transition mt-4"><i className="fa-solid fa-floppy-disk mr-2"></i> Save Settings Live</button>
+                                </div>
                             </div>
                         )}
 
