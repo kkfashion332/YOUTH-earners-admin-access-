@@ -14,7 +14,8 @@
     <style>
         body { background-color: #050505; color: #f8fafc; font-family: 'Arial', sans-serif; overflow-x: hidden; }
         .sidebar-active { background: linear-gradient(90deg, rgba(220,174,69,0.15) 0%, transparent 100%); border-left: 4px solid #dcae45; color: #dcae45 !important; }
-        .gold-glow { box-shadow: 0 0 15px rgba(220,174,69,0.15); }
+        .gold-glow { box-shadow: 0 0 15px rgba(220,174,69,0.3); border-color: #dcae45; }
+        .dull-utr { opacity: 0.5; filter: grayscale(100%); border-color: #333; }
         .hide-scrollbar::-webkit-scrollbar { display: none; }
     </style>
 </head>
@@ -23,7 +24,7 @@
 
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.1/firebase-app.js";
-        import { getFirestore, collection, query, where, getDocs, doc, getDoc, updateDoc, addDoc, deleteDoc, onSnapshot, setDoc } from "https://www.gstatic.com/firebasejs/10.8.1/firebase-firestore.js";
+        import { getFirestore, collection, query, where, getDocs, doc, getDoc, updateDoc, addDoc, deleteDoc, onSnapshot, setDoc, orderBy } from "https://www.gstatic.com/firebasejs/10.8.1/firebase-firestore.js";
 
         const firebaseConfig = {
             apiKey: "AIzaSyA4pTWtUMbZFhrMORZibUhV7gpPRy6DreY",
@@ -36,7 +37,7 @@
 
         const app = initializeApp(firebaseConfig);
         window.db = getFirestore(app);
-        window.fs = { collection, query, where, getDocs, doc, getDoc, updateDoc, addDoc, deleteDoc, onSnapshot, setDoc };
+        window.fs = { collection, query, where, getDocs, doc, getDoc, updateDoc, addDoc, deleteDoc, onSnapshot, setDoc, orderBy };
     </script>
 
     <script type="text/babel">
@@ -44,102 +45,93 @@
 
         function AdminPanel() {
             const [activeTab, setActiveTab] = useState('dashboard');
+            const [isSidebarOpen, setIsSidebarOpen] = useState(false); // For Mobile Responsiveness
             
-            // Layout States for Horizontal Sub-tabs
-            const [depTab, setDepTab] = useState('pending'); // pending, approved, rejected
+            const [depTab, setDepTab] = useState('pending'); 
             const [withTab, setWithTab] = useState('pending');
             
             const [deposits, setDeposits] = useState([]);
             const [withdrawals, setWithdrawals] = useState([]);
             const [autoUtrs, setAutoUtrs] = useState([]);
             const [matches, setMatches] = useState([]);
+            const [usersList, setUsersList] = useState([]); // New Users State
             
             const [newUtr, setNewUtr] = useState('');
             const [newUtrAmount, setNewUtrAmount] = useState('');
             const [matchEntry, setMatchEntry] = useState('');
             const [matchWin, setMatchWin] = useState('');
             
-            // Settings State
+            // Notification Modal State
+            const [notifyUser, setNotifyUser] = useState(null);
+            const [notifyText, setNotifyText] = useState('');
+            const [notifyImage, setNotifyImage] = useState('');
+
             const [settings, setSettings] = useState({ upiId: 'youthearners@nyes', qrUrl: 'payment-qr.png' });
 
             const chartRef = useRef(null);
             const chartInstance = useRef(null);
 
-            // ==========================================
-            // REAL-TIME DATABASE LISTENERS
-            // ==========================================
             useEffect(() => {
                 if(!window.fs) return;
                 
-                // Live All Deposits
                 const unsubDep = window.fs.onSnapshot(window.fs.collection(window.db, "deposits"), (snap) => {
                     let d = []; snap.forEach(doc => d.push({ id: doc.id, ...doc.data() }));
                     setDeposits(d);
                 });
 
-                // Live All Withdrawals
                 const unsubWith = window.fs.onSnapshot(window.fs.collection(window.db, "withdrawals"), (snap) => {
                     let w = []; snap.forEach(doc => w.push({ id: doc.id, ...doc.data() }));
                     setWithdrawals(w);
                 });
 
-                // Live Auto UTRs
-                const qUtr = window.fs.query(window.fs.collection(window.db, "auto_utrs"), window.fs.where("used", "==", false));
+                // Get ALL UTRs (Used and Unused) to show dull/bright
+                const qUtr = window.fs.query(window.fs.collection(window.db, "auto_utrs"));
                 const unsubUtr = window.fs.onSnapshot(qUtr, (snap) => {
                     let u = []; snap.forEach(doc => u.push({ id: doc.id, ...doc.data() }));
+                    // Sort so unused (new) are on top
+                    u.sort((a,b) => (a.used === b.used ? 0 : a.used ? 1 : -1));
                     setAutoUtrs(u);
                 });
 
-                // Live Match Tiers
                 const unsubMatches = window.fs.onSnapshot(window.fs.collection(window.db, "match_tiers"), (snap) => {
                     let m = []; snap.forEach(doc => m.push({ id: doc.id, ...doc.data() }));
                     m.sort((a,b) => a.entry - b.entry);
                     setMatches(m);
                 });
+
+                // Fetch Users
+                const unsubUsers = window.fs.onSnapshot(window.fs.collection(window.db, "users"), (snap) => {
+                    let uList = []; snap.forEach(doc => uList.push({ id: doc.id, ...doc.data() }));
+                    setUsersList(uList);
+                });
                 
-                // Fetch Settings
                 const fetchSettings = async () => {
                     const docSnap = await window.fs.getDoc(window.fs.doc(window.db, "admin_settings", "payment"));
                     if(docSnap.exists()) setSettings(docSnap.data());
                 };
                 fetchSettings();
 
-                return () => { unsubDep(); unsubWith(); unsubUtr(); unsubMatches(); };
+                return () => { unsubDep(); unsubWith(); unsubUtr(); unsubMatches(); unsubUsers(); };
             }, []);
 
-            // ==========================================
-            // GRAPHICAL CHART INITIALIZATION
-            // ==========================================
             useEffect(() => {
                 if (activeTab === 'dashboard' && chartRef.current) {
                     if (chartInstance.current) chartInstance.current.destroy();
                     const ctx = chartRef.current.getContext('2d');
-                    
                     const approvedDeps = deposits.filter(d => d.status === 'approved').reduce((sum, d) => sum + Number(d.amount), 0);
                     const approvedWiths = withdrawals.filter(w => w.status === 'approved').reduce((sum, w) => sum + Number(w.amount), 0);
-
                     chartInstance.current = new Chart(ctx, {
                         type: 'doughnut',
                         data: {
                             labels: ['Total Deposits (₹)', 'Total Withdrawals (₹)'],
-                            datasets: [{
-                                data: [approvedDeps, approvedWiths],
-                                backgroundColor: ['#10b981', '#f43f5e'],
-                                borderColor: '#050505',
-                                borderWidth: 4
-                            }]
+                            datasets: [{ data: [approvedDeps, approvedWiths], backgroundColor: ['#10b981', '#f43f5e'], borderColor: '#050505', borderWidth: 4 }]
                         },
-                        options: {
-                            responsive: true, maintainAspectRatio: false,
-                            plugins: { legend: { position: 'bottom', labels: { color: '#f8fafc', font: { weight: 'bold' } } } }
-                        }
+                        options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'bottom', labels: { color: '#f8fafc' } } } }
                     });
                 }
             }, [activeTab, deposits, withdrawals]);
 
-            // ==========================================
-            // DEPOSIT & REFERRAL LOGIC
-            // ==========================================
+            // Deposits Logic
             const approveDeposit = async (dep) => {
                 if(!confirm(`Approve ₹${dep.amount} for ${dep.name}?`)) return;
                 try {
@@ -149,36 +141,17 @@
                     if (userSnap.exists()) {
                         const userData = userSnap.data();
                         await window.fs.updateDoc(userRef, { wallet: Number(userData.wallet || 0) + Number(dep.amount) });
-
-                        if (dep.amount >= 30 && userData.referralUsed && !userData.referralRewardGiven) {
-                            const usersSnap = await window.fs.getDocs(window.fs.collection(window.db, "users"));
-                            let referrerDoc = null; let referrerData = null;
-                            usersSnap.forEach(uDoc => {
-                                const u = uDoc.data();
-                                const expectedCode = "YE-" + (u.number ? u.number.slice(-4) : "9999");
-                                if(expectedCode === userData.referralUsed) { referrerDoc = uDoc; referrerData = u; }
-                            });
-                            if(referrerDoc && referrerData) {
-                                await window.fs.updateDoc(window.fs.doc(window.db, "users", referrerDoc.id), { wallet: Number(referrerData.wallet || 0) + 10 });
-                                await window.fs.updateDoc(userRef, { referralRewardGiven: true });
-                            }
-                        }
                     }
-                    alert("Deposit Approved!");
-                } catch(e) { console.error(e); alert("Error approving deposit!"); }
+                } catch(e) { console.error(e); alert("Error!"); }
             };
 
             const rejectDeposit = async (id) => {
-                if(!confirm("Reject this deposit?")) return;
-                await window.fs.updateDoc(window.fs.doc(window.db, "deposits", id), { status: 'rejected' });
+                if(confirm("Reject this deposit?")) await window.fs.updateDoc(window.fs.doc(window.db, "deposits", id), { status: 'rejected' });
             };
 
-            // ==========================================
-            // WITHDRAWAL LOGIC
-            // ==========================================
+            // Withdrawals Logic (Makhkhan ki tarah chalega)
             const approveWithdrawal = async (id) => {
-                if(!confirm("Have you sent the money? Mark as Paid?")) return;
-                await window.fs.updateDoc(window.fs.doc(window.db, "withdrawals", id), { status: 'approved' });
+                if(confirm("Mark as Paid?")) await window.fs.updateDoc(window.fs.doc(window.db, "withdrawals", id), { status: 'approved' });
             };
 
             const rejectWithdrawal = async (withData) => {
@@ -191,127 +164,121 @@
                         const uData = userSnap.data();
                         await window.fs.updateDoc(userRef, { wallet: Number(uData.wallet || 0) + Number(withData.amount) });
                     }
-                    alert("Rejected & Refunded!");
-                } catch(e) { alert("Error rejecting!"); }
+                } catch(e) { alert("Error!"); }
             };
 
-            // ==========================================
-            // AUTO UTR LOGIC
-            // ==========================================
+            // Auto UTRs
             const addAutoUtr = async () => {
                 if(newUtr.length < 6 || !newUtrAmount) return alert("Enter valid UTR and Amount.");
                 await window.fs.addDoc(window.fs.collection(window.db, "auto_utrs"), { utr: newUtr, amount: Number(newUtrAmount), used: false, addedAt: new Date() });
-                setNewUtr(''); setNewUtrAmount(''); alert("Auto UTR Added Successfully!");
+                setNewUtr(''); setNewUtrAmount('');
             };
 
             const deleteAutoUtr = async (id) => {
-                if(confirm("Delete this UTR?")) await window.fs.deleteDoc(window.fs.doc(window.db, "auto_utrs", id));
+                if(confirm("Delete UTR?")) await window.fs.deleteDoc(window.fs.doc(window.db, "auto_utrs", id));
             };
 
-            // ==========================================
-            // MATCHES & SETTINGS LOGIC
-            // ==========================================
-            const addMatch = async () => {
-                if(!matchEntry || !matchWin) return alert("Fill entry and win amount");
-                await window.fs.addDoc(window.fs.collection(window.db, "match_tiers"), { 
-                    entry: Number(matchEntry), win: Number(matchWin), logo: 'youth-earners-logo.png' 
-                });
-                setMatchEntry(''); setMatchWin(''); alert("Match Tier Added!");
-            };
-
-            const deleteMatch = async (id) => {
-                if(confirm("Delete this match?")) await window.fs.deleteDoc(window.fs.doc(window.db, "match_tiers", id));
-            };
-            
-            const saveSettings = async () => {
+            // Individual Notification Sender
+            const sendNotification = async () => {
+                if(!notifyText) return alert("Please enter notification text!");
                 try {
-                    await window.fs.setDoc(window.fs.doc(window.db, "admin_settings", "payment"), settings);
-                    alert("Settings Updated Successfully!");
-                } catch(e) { alert("Error updating settings!"); }
+                    await window.fs.addDoc(window.fs.collection(window.db, "notifications"), {
+                        uid: notifyUser.id,
+                        text: notifyText,
+                        imageUrl: notifyImage || "",
+                        date: new Date(),
+                        read: false
+                    });
+                    alert("Notification Sent Successfully!");
+                    setNotifyUser(null); setNotifyText(''); setNotifyImage('');
+                } catch (e) { alert("Error sending notification"); console.error(e); }
             };
 
-            // Filtering Data based on Tabs
             const filteredDeposits = deposits.filter(d => d.status === depTab).sort((a,b) => (b.date?.toDate() || 0) - (a.date?.toDate() || 0));
             const filteredWithdrawals = withdrawals.filter(w => w.status === withTab).sort((a,b) => (b.date?.toDate() || 0) - (a.date?.toDate() || 0));
 
             return (
-                <div className="flex h-screen overflow-hidden">
-                    {/* SIDEBAR */}
-                    <div className="w-64 bg-[#0a0a0a] border-r border-gray-800 flex flex-col h-full z-20">
-                        <div className="p-6 text-center border-b border-gray-800">
-                            <h2 className="text-[#dcae45] text-xl font-black tracking-widest">ADMIN PANEL</h2>
-                            <p className="text-gray-500 text-[10px] font-bold uppercase tracking-widest mt-1">Youth Earner's VIP</p>
+                <div className="flex h-screen overflow-hidden bg-[#050505]">
+                    
+                    {/* Mobile Overlay */}
+                    {isSidebarOpen && <div className="fixed inset-0 bg-black/80 z-40 md:hidden" onClick={() => setIsSidebarOpen(false)}></div>}
+
+                    {/* SIDEBAR (Responsive) */}
+                    <div className={`fixed md:relative z-50 h-full w-64 bg-[#0a0a0a] border-r border-gray-800 flex flex-col transition-transform duration-300 ${isSidebarOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0'}`}>
+                        <div className="p-6 flex justify-between items-center border-b border-gray-800">
+                            <div className="text-center w-full">
+                                <h2 className="text-[#dcae45] text-xl font-black tracking-widest">ADMIN PANEL</h2>
+                                <p className="text-gray-500 text-[10px] font-bold uppercase tracking-widest mt-1">Youth Earner's VIP</p>
+                            </div>
+                            <button className="md:hidden text-gray-400 hover:text-white" onClick={() => setIsSidebarOpen(false)}><i className="fa-solid fa-xmark text-xl"></i></button>
                         </div>
                         
-                        <div className="flex-1 py-4 space-y-1">
-                            <button onClick={()=>setActiveTab('dashboard')} className={`w-full text-left px-6 py-4 text-sm font-bold text-gray-400 hover:text-white transition flex items-center gap-4 ${activeTab==='dashboard'?'sidebar-active':''}`}><i className="fa-solid fa-chart-pie w-5 text-center"></i> Dashboard</button>
-                            <button onClick={()=>setActiveTab('matches')} className={`w-full text-left px-6 py-4 text-sm font-bold text-gray-400 hover:text-white transition flex items-center gap-4 ${activeTab==='matches'?'sidebar-active':''}`}><i className="fa-solid fa-gamepad w-5 text-center"></i> Matches</button>
-                            <button onClick={()=>setActiveTab('autoUtrs')} className={`w-full text-left px-6 py-4 text-sm font-bold text-gray-400 hover:text-white transition flex items-center gap-4 ${activeTab==='autoUtrs'?'sidebar-active':''}`}><i className="fa-solid fa-bolt w-5 text-center"></i> Auto UTRs</button>
-                            <button onClick={()=>setActiveTab('deposits')} className={`w-full text-left px-6 py-4 text-sm font-bold text-gray-400 hover:text-white transition flex items-center gap-4 ${activeTab==='deposits'?'sidebar-active':''}`}><i className="fa-solid fa-arrow-down w-5 text-center"></i> Deposits {deposits.filter(d=>d.status==='pending').length>0 && <span className="bg-red-500 text-white text-[10px] px-2 py-0.5 rounded-full">{deposits.filter(d=>d.status==='pending').length}</span>}</button>
-                            <button onClick={()=>setActiveTab('withdrawals')} className={`w-full text-left px-6 py-4 text-sm font-bold text-gray-400 hover:text-white transition flex items-center gap-4 ${activeTab==='withdrawals'?'sidebar-active':''}`}><i className="fa-solid fa-arrow-up w-5 text-center"></i> Withdrawals {withdrawals.filter(w=>w.status==='pending').length>0 && <span className="bg-red-500 text-white text-[10px] px-2 py-0.5 rounded-full">{withdrawals.filter(w=>w.status==='pending').length}</span>}</button>
-                            <button onClick={()=>setActiveTab('settings')} className={`w-full text-left px-6 py-4 text-sm font-bold text-gray-400 hover:text-white transition flex items-center gap-4 ${activeTab==='settings'?'sidebar-active':''}`}><i className="fa-solid fa-gear w-5 text-center"></i> Settings</button>
+                        <div className="flex-1 py-4 space-y-1 overflow-y-auto hide-scrollbar">
+                            {['dashboard', 'matches', 'autoUtrs', 'deposits', 'withdrawals', 'users', 'settings'].map(tab => (
+                                <button key={tab} onClick={() => { setActiveTab(tab); setIsSidebarOpen(false); }} className={`w-full text-left px-6 py-4 text-sm font-bold transition flex items-center gap-4 ${activeTab === tab ? 'sidebar-active text-[#dcae45]' : 'text-gray-400 hover:text-white'}`}>
+                                    <i className={`fa-solid ${tab==='dashboard'?'fa-chart-pie':tab==='matches'?'fa-gamepad':tab==='autoUtrs'?'fa-bolt':tab==='deposits'?'fa-arrow-down':tab==='withdrawals'?'fa-arrow-up':tab==='users'?'fa-users':'fa-gear'} w-5 text-center`}></i>
+                                    <span className="capitalize">{tab === 'autoUtrs' ? 'Auto UTRs' : tab}</span>
+                                    {tab === 'deposits' && deposits.filter(d=>d.status==='pending').length>0 && <span className="ml-auto bg-red-500 text-white text-[10px] px-2 py-0.5 rounded-full">{deposits.filter(d=>d.status==='pending').length}</span>}
+                                    {tab === 'withdrawals' && withdrawals.filter(w=>w.status==='pending').length>0 && <span className="ml-auto bg-red-500 text-white text-[10px] px-2 py-0.5 rounded-full">{withdrawals.filter(w=>w.status==='pending').length}</span>}
+                                </button>
+                            ))}
                         </div>
                     </div>
 
                     {/* MAIN CONTENT */}
-                    <div className="flex-1 h-full overflow-y-auto bg-[#050505] p-8 hide-scrollbar relative">
+                    <div className="flex-1 h-full overflow-y-auto p-4 md:p-8 hide-scrollbar relative">
                         
-                        <div className="mb-8">
-                            <h1 className="text-2xl font-black text-white uppercase tracking-widest border-b-2 border-[#dcae45] inline-block pb-2">
+                        {/* Header for Mobile */}
+                        <div className="flex items-center gap-4 mb-6 md:mb-8">
+                            <button className="md:hidden text-[#dcae45] text-2xl" onClick={() => setIsSidebarOpen(true)}>
+                                <i className="fa-solid fa-bars"></i>
+                            </button>
+                            <h1 className="text-xl md:text-2xl font-black text-white uppercase tracking-widest border-b-2 border-[#dcae45] inline-block pb-1 md:pb-2">
                                 {activeTab.replace(/([A-Z])/g, ' $1').trim()} {activeTab === 'dashboard' && 'OVERVIEW'}
                             </h1>
                         </div>
 
-                        {/* DASHBOARD TAB WITH GRAPHICS */}
+                        {/* DASHBOARD TAB */}
                         {activeTab === 'dashboard' && (
                             <div>
-                                <div className="grid grid-cols-3 gap-6 mb-8">
-                                    <div className="bg-[#111] border border-gray-800 p-6 rounded-2xl gold-glow flex items-center gap-6">
+                                <div className="grid grid-cols-1 md:grid-cols-3 gap-4 md:gap-6 mb-8">
+                                    <div className="bg-[#111] border border-gray-800 p-6 rounded-2xl flex items-center gap-6">
                                         <div className="w-14 h-14 rounded-full bg-yellow-500/10 text-yellow-500 flex items-center justify-center text-2xl"><i className="fa-solid fa-clock"></i></div>
                                         <div><p className="text-gray-500 text-xs font-bold uppercase tracking-widest">Pending Deposits</p><h2 className="text-4xl font-black text-white">{deposits.filter(d=>d.status==='pending').length}</h2></div>
                                     </div>
-                                    <div className="bg-[#111] border border-gray-800 p-6 rounded-2xl gold-glow flex items-center gap-6">
+                                    <div className="bg-[#111] border border-gray-800 p-6 rounded-2xl flex items-center gap-6">
                                         <div className="w-14 h-14 rounded-full bg-rose-500/10 text-rose-500 flex items-center justify-center text-2xl"><i className="fa-solid fa-money-bill-transfer"></i></div>
                                         <div><p className="text-gray-500 text-xs font-bold uppercase tracking-widest">Pending Withdrawals</p><h2 className="text-4xl font-black text-white">{withdrawals.filter(w=>w.status==='pending').length}</h2></div>
                                     </div>
-                                    <div className="bg-[#111] border border-gray-800 p-6 rounded-2xl gold-glow flex items-center gap-6">
-                                        <div className="w-14 h-14 rounded-full bg-[#10b981]/10 text-[#10b981] flex items-center justify-center text-2xl"><i className="fa-solid fa-bolt"></i></div>
-                                        <div><p className="text-gray-500 text-xs font-bold uppercase tracking-widest">Active Auto-UTRs</p><h2 className="text-4xl font-black text-white">{autoUtrs.length}</h2></div>
-                                    </div>
                                 </div>
-                                <div className="bg-[#111] border border-gray-800 p-6 rounded-2xl w-full max-w-2xl mx-auto h-[400px]">
-                                    <h3 className="text-center text-gray-400 font-bold tracking-widest uppercase mb-4">Financial Overview</h3>
+                                <div className="bg-[#111] border border-gray-800 p-6 rounded-2xl w-full max-w-2xl mx-auto h-[300px] md:h-[400px]">
                                     <canvas ref={chartRef}></canvas>
                                 </div>
                             </div>
                         )}
 
-                        {/* DEPOSITS TAB (With Horizontal Options) */}
+                        {/* DEPOSITS TAB */}
                         {activeTab === 'deposits' && (
                             <div>
-                                <div className="flex gap-4 mb-6 border-b border-gray-800 pb-4">
-                                    <button onClick={() => setDepTab('pending')} className={`px-6 py-2 rounded-lg font-bold text-sm transition ${depTab === 'pending' ? 'bg-[#dcae45] text-black shadow-[0_0_10px_rgba(220,174,69,0.5)]' : 'bg-transparent text-gray-500 hover:text-white'}`}>Pending</button>
-                                    <button onClick={() => setDepTab('approved')} className={`px-6 py-2 rounded-lg font-bold text-sm transition ${depTab === 'approved' ? 'bg-[#10b981] text-black shadow-[0_0_10px_rgba(16,185,129,0.5)]' : 'bg-transparent text-gray-500 hover:text-white'}`}>Approved</button>
-                                    <button onClick={() => setDepTab('rejected')} className={`px-6 py-2 rounded-lg font-bold text-sm transition ${depTab === 'rejected' ? 'bg-rose-500 text-white shadow-[0_0_10px_rgba(244,63,94,0.5)]' : 'bg-transparent text-gray-500 hover:text-white'}`}>Rejected / Cancelled</button>
+                                <div className="flex overflow-x-auto gap-2 md:gap-4 mb-6 border-b border-gray-800 pb-4 hide-scrollbar">
+                                    <button onClick={() => setDepTab('pending')} className={`whitespace-nowrap px-4 md:px-6 py-2 rounded-lg font-bold text-xs md:text-sm transition ${depTab === 'pending' ? 'bg-[#dcae45] text-black shadow-[0_0_10px_rgba(220,174,69,0.5)]' : 'bg-transparent text-gray-500'}`}>Pending</button>
+                                    <button onClick={() => setDepTab('approved')} className={`whitespace-nowrap px-4 md:px-6 py-2 rounded-lg font-bold text-xs md:text-sm transition ${depTab === 'approved' ? 'bg-[#10b981] text-black shadow-[0_0_10px_rgba(16,185,129,0.5)]' : 'bg-transparent text-gray-500'}`}>Approved</button>
+                                    <button onClick={() => setDepTab('rejected')} className={`whitespace-nowrap px-4 md:px-6 py-2 rounded-lg font-bold text-xs md:text-sm transition ${depTab === 'rejected' ? 'bg-rose-500 text-white' : 'bg-transparent text-gray-500'}`}>Rejected</button>
                                 </div>
                                 <div className="space-y-4">
-                                    {filteredDeposits.length === 0 && <p className="text-gray-500 font-bold">No {depTab} deposits found.</p>}
                                     {filteredDeposits.map(dep => (
-                                        <div key={dep.id} className="bg-[#111] border border-gray-800 p-5 rounded-2xl flex justify-between items-center hover:border-[#dcae45]/50 transition">
+                                        <div key={dep.id} className="bg-[#111] border border-gray-800 p-4 md:p-5 rounded-2xl flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
                                             <div>
-                                                <h3 className="text-xl font-bold text-white mb-1">{dep.name}</h3>
-                                                <p className="text-gray-400 text-sm font-bold mb-1">UTR: <span className="text-[#ffe29a] tracking-widest">{dep.utr}</span></p>
-                                                <p className="text-gray-500 text-xs">{dep.date ? new Date(dep.date.toDate()).toLocaleString() : ''}</p>
+                                                <h3 className="text-lg md:text-xl font-bold text-white mb-1">{dep.name}</h3>
+                                                <p className="text-gray-400 text-sm font-bold mb-1">UTR: <span className="text-[#ffe29a]">{dep.utr}</span></p>
                                             </div>
-                                            <div className="text-right">
-                                                <div className={`text-3xl font-black mb-3 ${dep.status === 'rejected' ? 'text-gray-500 line-through' : 'text-[#10b981]'}`}>+₹{dep.amount}</div>
-                                                {dep.status === 'pending' ? (
+                                            <div className="w-full md:w-auto text-left md:text-right flex flex-row md:flex-col justify-between md:justify-start items-center md:items-end">
+                                                <div className="text-2xl md:text-3xl font-black text-[#10b981] mb-0 md:mb-3">+₹{dep.amount}</div>
+                                                {dep.status === 'pending' && (
                                                     <div className="flex gap-2">
-                                                        <button onClick={() => rejectDeposit(dep.id)} className="bg-rose-500/10 text-rose-500 px-4 py-2 rounded-lg font-bold hover:bg-rose-500 hover:text-white transition"><i className="fa-solid fa-xmark"></i></button>
-                                                        <button onClick={() => approveDeposit(dep)} className="bg-[#10b981] text-black px-6 py-2 rounded-lg font-black hover:scale-105 transition"><i className="fa-solid fa-check mr-2"></i> Approve</button>
+                                                        <button onClick={() => rejectDeposit(dep.id)} className="bg-rose-500/10 text-rose-500 px-3 py-1.5 md:px-4 md:py-2 rounded-lg font-bold"><i className="fa-solid fa-xmark"></i></button>
+                                                        <button onClick={() => approveDeposit(dep)} className="bg-[#10b981] text-black px-4 py-1.5 md:px-6 md:py-2 rounded-lg font-black"><i className="fa-solid fa-check mr-1"></i> Approve</button>
                                                     </div>
-                                                ) : (
-                                                    <span className={`text-xs font-black uppercase px-3 py-1 rounded-full ${dep.status === 'approved' ? 'bg-[#10b981]/20 text-[#10b981]' : 'bg-rose-500/20 text-rose-500'}`}>{dep.status}</span>
                                                 )}
                                             </div>
                                         </div>
@@ -320,32 +287,28 @@
                             </div>
                         )}
 
-                        {/* WITHDRAWALS TAB (With Horizontal Options) */}
+                        {/* WITHDRAWALS TAB */}
                         {activeTab === 'withdrawals' && (
                             <div>
-                                <div className="flex gap-4 mb-6 border-b border-gray-800 pb-4">
-                                    <button onClick={() => setWithTab('pending')} className={`px-6 py-2 rounded-lg font-bold text-sm transition ${withTab === 'pending' ? 'bg-[#dcae45] text-black shadow-[0_0_10px_rgba(220,174,69,0.5)]' : 'bg-transparent text-gray-500 hover:text-white'}`}>Pending</button>
-                                    <button onClick={() => setWithTab('approved')} className={`px-6 py-2 rounded-lg font-bold text-sm transition ${withTab === 'approved' ? 'bg-[#10b981] text-black shadow-[0_0_10px_rgba(16,185,129,0.5)]' : 'bg-transparent text-gray-500 hover:text-white'}`}>Successfully Paid</button>
-                                    <button onClick={() => setWithTab('rejected')} className={`px-6 py-2 rounded-lg font-bold text-sm transition ${withTab === 'rejected' ? 'bg-rose-500 text-white shadow-[0_0_10px_rgba(244,63,94,0.5)]' : 'bg-transparent text-gray-500 hover:text-white'}`}>Rejected / Refunded</button>
+                                <div className="flex overflow-x-auto gap-2 md:gap-4 mb-6 border-b border-gray-800 pb-4 hide-scrollbar">
+                                    <button onClick={() => setWithTab('pending')} className={`whitespace-nowrap px-4 md:px-6 py-2 rounded-lg font-bold text-xs md:text-sm transition ${withTab === 'pending' ? 'bg-[#dcae45] text-black shadow-[0_0_10px_rgba(220,174,69,0.5)]' : 'bg-transparent text-gray-500'}`}>Pending</button>
+                                    <button onClick={() => setWithTab('approved')} className={`whitespace-nowrap px-4 md:px-6 py-2 rounded-lg font-bold text-xs md:text-sm transition ${withTab === 'approved' ? 'bg-[#10b981] text-black shadow-[0_0_10px_rgba(16,185,129,0.5)]' : 'bg-transparent text-gray-500'}`}>Paid</button>
+                                    <button onClick={() => setWithTab('rejected')} className={`whitespace-nowrap px-4 md:px-6 py-2 rounded-lg font-bold text-xs md:text-sm transition ${withTab === 'rejected' ? 'bg-rose-500 text-white' : 'bg-transparent text-gray-500'}`}>Refunded</button>
                                 </div>
                                 <div className="space-y-4">
-                                    {filteredWithdrawals.length === 0 && <p className="text-gray-500 font-bold">No {withTab} withdrawals found.</p>}
                                     {filteredWithdrawals.map(w => (
-                                        <div key={w.id} className="bg-[#111] border border-gray-800 p-5 rounded-2xl flex justify-between items-center hover:border-[#dcae45]/50 transition">
+                                        <div key={w.id} className="bg-[#111] border border-gray-800 p-4 md:p-5 rounded-2xl flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
                                             <div>
-                                                <h3 className="text-xl font-bold text-white mb-1">{w.name}</h3>
+                                                <h3 className="text-lg md:text-xl font-bold text-white mb-1">{w.name}</h3>
                                                 <p className="text-gray-400 text-sm font-bold uppercase mb-1">{w.type}: <span className="text-white tracking-widest">{w.id}</span></p>
-                                                <p className="text-gray-500 text-xs">{w.date ? new Date(w.date.toDate()).toLocaleString() : ''}</p>
                                             </div>
-                                            <div className="text-right">
-                                                <div className={`text-3xl font-black mb-3 ${w.status === 'rejected' ? 'text-gray-500 line-through' : 'text-rose-500'}`}>-₹{w.amount}</div>
-                                                {w.status === 'pending' ? (
+                                            <div className="w-full md:w-auto text-left md:text-right flex flex-row md:flex-col justify-between md:justify-start items-center md:items-end">
+                                                <div className="text-2xl md:text-3xl font-black text-rose-500 mb-0 md:mb-3">-₹{w.amount}</div>
+                                                {w.status === 'pending' && (
                                                     <div className="flex gap-2">
-                                                        <button onClick={() => rejectWithdrawal(w)} className="bg-rose-500/10 text-rose-500 px-4 py-2 rounded-lg font-bold hover:bg-rose-500 hover:text-white transition" title="Reject & Refund"><i className="fa-solid fa-rotate-left mr-1"></i> Refund</button>
-                                                        <button onClick={() => approveWithdrawal(w.id)} className="bg-[#dcae45] text-black px-6 py-2 rounded-lg font-black hover:scale-105 transition"><i className="fa-solid fa-check mr-2"></i> Mark Paid</button>
+                                                        <button onClick={() => rejectWithdrawal(w)} className="bg-rose-500/10 text-rose-500 px-3 py-1.5 md:px-4 md:py-2 rounded-lg font-bold"><i className="fa-solid fa-rotate-left mr-1"></i> Refund</button>
+                                                        <button onClick={() => approveWithdrawal(w.id)} className="bg-[#dcae45] text-black px-4 py-1.5 md:px-6 md:py-2 rounded-lg font-black"><i className="fa-solid fa-check mr-1"></i> Paid</button>
                                                     </div>
-                                                ) : (
-                                                    <span className={`text-xs font-black uppercase px-3 py-1 rounded-full ${w.status === 'approved' ? 'bg-[#10b981]/20 text-[#10b981]' : 'bg-rose-500/20 text-rose-500'}`}>{w.status}</span>
                                                 )}
                                             </div>
                                         </div>
@@ -354,31 +317,90 @@
                             </div>
                         )}
 
-                        {/* AUTO UTRS TAB (Amount Added) */}
+                        {/* AUTO UTRS TAB (Dull vs Bright) */}
                         {activeTab === 'autoUtrs' && (
                             <div>
-                                <div className="bg-[#111] border border-[#dcae45] p-6 rounded-2xl mb-8 flex gap-4 items-end">
-                                    <div className="flex-[2]">
-                                        <label className="text-gray-400 text-xs font-bold uppercase tracking-widest block mb-2">Add New UTR from Bank SMS</label>
-                                        <input type="text" value={newUtr} onChange={e=>setNewUtr(e.target.value)} className="w-full bg-black border border-gray-700 p-3 rounded-xl text-white focus:border-[#dcae45] outline-none" placeholder="Enter 12-Digit UTR" />
+                                <div className="bg-[#111] border border-[#dcae45] p-4 md:p-6 rounded-2xl mb-8 flex flex-col md:flex-row gap-4 items-end">
+                                    <div className="w-full md:flex-[2]">
+                                        <label className="text-gray-400 text-xs font-bold uppercase tracking-widest block mb-2">New UTR</label>
+                                        <input type="text" value={newUtr} onChange={e=>setNewUtr(e.target.value)} className="w-full bg-black border border-gray-700 p-3 rounded-xl text-white" placeholder="12-Digit UTR" />
                                     </div>
-                                    <div className="flex-1">
+                                    <div className="w-full md:flex-1">
                                         <label className="text-gray-400 text-xs font-bold uppercase tracking-widest block mb-2">Amount (₹)</label>
-                                        <input type="number" value={newUtrAmount} onChange={e=>setNewUtrAmount(e.target.value)} className="w-full bg-black border border-gray-700 p-3 rounded-xl text-white focus:border-[#dcae45] outline-none" placeholder="e.g. 50" />
+                                        <input type="number" value={newUtrAmount} onChange={e=>setNewUtrAmount(e.target.value)} className="w-full bg-black border border-gray-700 p-3 rounded-xl text-white" placeholder="e.g. 50" />
                                     </div>
-                                    <button onClick={addAutoUtr} className="bg-[#dcae45] text-black px-8 py-3 rounded-xl font-black hover:bg-[#ffe29a] transition"><i className="fa-solid fa-plus"></i> Add</button>
+                                    <button onClick={addAutoUtr} className="w-full md:w-auto bg-[#dcae45] text-black px-8 py-3 rounded-xl font-black hover:bg-[#ffe29a]">Add</button>
                                 </div>
-                                <h3 className="text-gray-400 font-bold uppercase tracking-widest text-sm mb-4">Unused Auto UTRs ({autoUtrs.length})</h3>
-                                <div className="grid grid-cols-2 gap-4">
+
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                                     {autoUtrs.map(u => (
-                                        <div key={u.id} className="bg-[#111] border border-gray-800 p-4 rounded-xl flex justify-between items-center">
+                                        <div key={u.id} className={`p-4 rounded-xl flex justify-between items-center transition border bg-[#111] ${u.used ? 'dull-utr' : 'gold-glow'}`}>
                                             <div>
-                                                <span className="text-xl font-black tracking-widest text-[#ffe29a] block">{u.utr}</span>
-                                                <span className="text-sm font-bold text-[#10b981]">₹{u.amount}</span>
+                                                <span className={`text-lg md:text-xl font-black tracking-widest block ${u.used ? 'text-gray-500 line-through' : 'text-[#ffe29a]'}`}>{u.utr}</span>
+                                                <span className={`text-sm font-bold ${u.used ? 'text-gray-600' : 'text-[#10b981]'}`}>₹{u.amount} {u.used && '(Used)'}</span>
                                             </div>
-                                            <button onClick={() => deleteAutoUtr(u.id)} className="text-rose-500 hover:text-rose-400 text-xl"><i className="fa-solid fa-trash"></i></button>
+                                            <button onClick={() => deleteAutoUtr(u.id)} className="text-rose-500 hover:text-rose-400 p-2"><i className="fa-solid fa-trash"></i></button>
                                         </div>
                                     ))}
+                                </div>
+                            </div>
+                        )}
+
+                        {/* USERS TAB (NEW) */}
+                        {activeTab === 'users' && (
+                            <div>
+                                <h3 className="text-gray-400 font-bold uppercase tracking-widest text-sm mb-4">All Registered Users ({usersList.length})</h3>
+                                <div className="space-y-3">
+                                    {usersList.map(user => (
+                                        <div key={user.id} className="bg-[#111] border border-gray-800 p-4 rounded-xl flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+                                            <div>
+                                                <div className="text-white font-bold text-lg">{user.name || "Unknown"}</div>
+                                                <div className="text-gray-400 text-sm"><i className="fa-solid fa-phone text-xs mr-1"></i> {user.number || "N/A"}</div>
+                                                <div className="text-[#dcae45] font-black text-sm mt-1">Wallet: ₹{user.wallet || 0}</div>
+                                            </div>
+                                            <button onClick={() => setNotifyUser(user)} className="w-full md:w-auto bg-blue-500/10 text-blue-500 px-4 py-2 rounded-lg font-bold hover:bg-blue-500 hover:text-white transition">
+                                                <i className="fa-solid fa-bell mr-2"></i> Send Notification
+                                            </button>
+                                        </div>
+                                    ))}
+                                </div>
+
+                                {/* Notification Modal */}
+                                {notifyUser && (
+                                    <div className="fixed inset-0 bg-black/90 z-50 flex items-center justify-center p-4">
+                                        <div className="bg-[#111] border border-[#dcae45] p-6 rounded-2xl w-full max-w-md">
+                                            <h3 className="text-white font-bold text-lg mb-4">Notify: <span className="text-[#dcae45]">{notifyUser.name}</span></h3>
+                                            
+                                            <label className="text-gray-400 text-xs font-bold uppercase mb-2 block">Notification Text</label>
+                                            <textarea value={notifyText} onChange={e=>setNotifyText(e.target.value)} className="w-full bg-black border border-gray-700 p-3 rounded-xl text-white mb-4" rows="3" placeholder="Message to show in bell icon..."></textarea>
+                                            
+                                            <label className="text-gray-400 text-xs font-bold uppercase mb-2 block">Banner Image URL (Optional)</label>
+                                            <input type="text" value={notifyImage} onChange={e=>setNotifyImage(e.target.value)} className="w-full bg-black border border-gray-700 p-3 rounded-xl text-white mb-6" placeholder="https://..." />
+                                            
+                                            <div className="flex gap-3">
+                                                <button onClick={()=>setNotifyUser(null)} className="flex-1 bg-gray-800 text-white py-3 rounded-xl font-bold">Cancel</button>
+                                                <button onClick={sendNotification} className="flex-1 bg-[#dcae45] text-black py-3 rounded-xl font-black">Send <i className="fa-solid fa-paper-plane ml-1"></i></button>
+                                            </div>
+                                        </div>
+                                    </div>
+                                )}
+                            </div>
+                        )}
+
+                        {/* SETTINGS TAB */}
+                        {activeTab === 'settings' && (
+                            <div className="bg-[#111] border border-gray-800 p-6 md:p-8 rounded-2xl max-w-2xl mx-auto">
+                                <h2 className="text-xl md:text-2xl font-black text-white uppercase tracking-widest mb-6"><i className="fa-solid fa-gear text-[#dcae45] mr-2"></i> Payment Settings</h2>
+                                <div className="space-y-6">
+                                    <div>
+                                        <label className="text-gray-400 text-sm font-bold uppercase tracking-widest block mb-2">Your UPI ID</label>
+                                        <input type="text" value={settings.upiId} onChange={e => setSettings({...settings, upiId: e.target.value})} className="w-full bg-black border border-gray-700 p-3 md:p-4 rounded-xl text-white" />
+                                    </div>
+                                    <div>
+                                        <label className="text-gray-400 text-sm font-bold uppercase tracking-widest block mb-2">QR Code URL</label>
+                                        <input type="text" value={settings.qrUrl} onChange={e => setSettings({...settings, qrUrl: e.target.value})} className="w-full bg-black border border-gray-700 p-3 md:p-4 rounded-xl text-white" />
+                                    </div>
+                                    <button onClick={async () => { await window.fs.setDoc(window.fs.doc(window.db, "admin_settings", "payment"), settings); alert("Saved!"); }} className="w-full bg-[#dcae45] text-black px-8 py-3 md:py-4 rounded-xl font-black mt-4">Save Settings Live</button>
                                 </div>
                             </div>
                         )}
@@ -386,47 +408,19 @@
                         {/* MATCHES TAB */}
                         {activeTab === 'matches' && (
                             <div>
-                                <div className="bg-[#111] border border-[#dcae45] p-6 rounded-2xl mb-8 flex gap-4 items-end">
-                                    <div className="flex-1">
-                                        <label className="text-gray-400 text-xs font-bold uppercase tracking-widest block mb-2">Entry Fee (₹)</label>
-                                        <input type="number" value={matchEntry} onChange={e=>setMatchEntry(e.target.value)} className="w-full bg-black border border-gray-700 p-3 rounded-xl text-white focus:border-[#dcae45] outline-none" placeholder="e.g. 50" />
-                                    </div>
-                                    <div className="flex-1">
-                                        <label className="text-gray-400 text-xs font-bold uppercase tracking-widest block mb-2">Win Amount (₹)</label>
-                                        <input type="number" value={matchWin} onChange={e=>setMatchWin(e.target.value)} className="w-full bg-black border border-gray-700 p-3 rounded-xl text-white focus:border-[#dcae45] outline-none" placeholder="e.g. 90" />
-                                    </div>
-                                    <button onClick={addMatch} className="bg-[#dcae45] text-black px-8 py-3 rounded-xl font-black hover:bg-[#ffe29a] transition"><i className="fa-solid fa-plus"></i> Create Match</button>
+                                <div className="bg-[#111] border border-[#dcae45] p-4 md:p-6 rounded-2xl mb-8 flex flex-col md:flex-row gap-4 items-end">
+                                    <div className="w-full flex-1"><label className="text-gray-400 text-xs font-bold uppercase tracking-widest block mb-2">Entry Fee (₹)</label><input type="number" value={matchEntry} onChange={e=>setMatchEntry(e.target.value)} className="w-full bg-black border border-gray-700 p-3 rounded-xl text-white" /></div>
+                                    <div className="w-full flex-1"><label className="text-gray-400 text-xs font-bold uppercase tracking-widest block mb-2">Win Amount (₹)</label><input type="number" value={matchWin} onChange={e=>setMatchWin(e.target.value)} className="w-full bg-black border border-gray-700 p-3 rounded-xl text-white" /></div>
+                                    <button onClick={async () => { if(matchEntry&&matchWin) { await window.fs.addDoc(window.fs.collection(window.db, "match_tiers"), { entry: Number(matchEntry), win: Number(matchWin) }); setMatchEntry(''); setMatchWin(''); } }} className="w-full md:w-auto bg-[#dcae45] text-black px-8 py-3 rounded-xl font-black">Add Match</button>
                                 </div>
-
-                                <div className="grid grid-cols-3 gap-6">
+                                <div className="grid grid-cols-2 md:grid-cols-3 gap-4 md:gap-6">
                                     {matches.map(m => (
                                         <div key={m.id} className="bg-[#111] border border-gray-800 p-5 rounded-2xl relative text-center">
-                                            <button onClick={() => deleteMatch(m.id)} className="absolute top-3 right-3 text-gray-500 hover:text-rose-500"><i className="fa-solid fa-trash"></i></button>
-                                            <img src="youth-earners-logo.png" className="h-10 mx-auto mb-4 mix-blend-screen opacity-80" />
-                                            <div className="text-gray-400 text-sm mb-1">Entry: <span className="text-white font-bold">₹{m.entry}</span></div>
-                                            <div className="text-[#ffe29a] text-2xl font-black">WIN: ₹{m.win}</div>
+                                            <button onClick={() => window.fs.deleteDoc(window.fs.doc(window.db, "match_tiers", m.id))} className="absolute top-3 right-3 text-gray-500 hover:text-rose-500"><i className="fa-solid fa-trash"></i></button>
+                                            <div className="text-gray-400 text-sm mb-1 mt-4">Entry: <span className="text-white font-bold">₹{m.entry}</span></div>
+                                            <div className="text-[#ffe29a] text-xl md:text-2xl font-black">WIN: ₹{m.win}</div>
                                         </div>
                                     ))}
-                                </div>
-                            </div>
-                        )}
-
-                        {/* SETTINGS TAB (UPI & QR) */}
-                        {activeTab === 'settings' && (
-                            <div className="bg-[#111] border border-gray-800 p-8 rounded-2xl max-w-2xl mx-auto">
-                                <h2 className="text-2xl font-black text-white uppercase tracking-widest mb-6"><i className="fa-solid fa-gear text-[#dcae45] mr-2"></i> Payment Settings</h2>
-                                
-                                <div className="space-y-6">
-                                    <div>
-                                        <label className="text-gray-400 text-sm font-bold uppercase tracking-widest block mb-2">Your UPI ID</label>
-                                        <input type="text" value={settings.upiId} onChange={e => setSettings({...settings, upiId: e.target.value})} className="w-full bg-black border border-gray-700 p-4 rounded-xl text-white focus:border-[#dcae45] outline-none font-bold" placeholder="e.g. youthearners@nyes" />
-                                    </div>
-                                    <div>
-                                        <label className="text-gray-400 text-sm font-bold uppercase tracking-widest block mb-2">QR Code Image Name/URL</label>
-                                        <input type="text" value={settings.qrUrl} onChange={e => setSettings({...settings, qrUrl: e.target.value})} className="w-full bg-black border border-gray-700 p-4 rounded-xl text-white focus:border-[#dcae45] outline-none font-bold" placeholder="e.g. payment-qr.png" />
-                                        <p className="text-xs text-gray-500 mt-2">* Note: Ensure the image file exists in your repository (like payment-qr.png) or use a direct web link.</p>
-                                    </div>
-                                    <button onClick={saveSettings} className="w-full bg-[#dcae45] text-black px-8 py-4 rounded-xl font-black hover:bg-[#ffe29a] transition mt-4"><i className="fa-solid fa-floppy-disk mr-2"></i> Save Settings Live</button>
                                 </div>
                             </div>
                         )}
